@@ -27,21 +27,21 @@ export default function PinGate({ children }) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-ink-950 px-4">
-      <form onSubmit={submit} className="bg-ink-900 seam-top border border-ink-700 rounded-2xl shadow-xl p-8 w-full max-w-sm text-center">
-        <h1 className="text-2xl font-bold font-display text-paper-100 mb-1">Needle Point</h1>
-        <p className="text-paper-400 mb-6">Enter PIN to continue</p>
+    <div className="min-h-screen flex items-center justify-center bg-gray-950 px-4">
+      <form onSubmit={submit} className="bg-gray-900 border border-gray-800 rounded-2xl shadow-xl p-8 w-full max-w-sm text-center">
+        <h1 className="text-2xl font-bold text-brand-500 mb-1">Needle Point</h1>
+        <p className="text-gray-400 mb-6">Enter PIN to continue</p>
         <input
           type="password"
           inputMode="numeric"
           autoFocus
           value={entered}
           onChange={(e) => { setEntered(e.target.value); setError(false) }}
-          className="w-full text-center text-2xl tracking-widest bg-ink-800 border border-ink-700 text-paper-100 rounded-xl py-3 mb-4 focus:outline-none focus:border-thread-500"
+          className="w-full text-center text-2xl tracking-widest bg-gray-800 border border-gray-700 text-gray-100 rounded-xl py-3 mb-4"
           placeholder="••••"
         />
         {error && <p className="text-red-400 text-sm mb-3">Wrong PIN, try again</p>}
-        <button className="w-full bg-thread-500 hover:bg-thread-600 text-ink-950 rounded-xl py-3 font-semibold transition-colors">
+        <button className="w-full bg-brand-600 hover:bg-brand-700 text-white rounded-xl py-3 font-semibold">
           Enter
         </button>
       </form>
