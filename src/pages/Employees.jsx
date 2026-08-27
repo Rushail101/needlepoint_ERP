@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
+import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
 
 export default function Employees() {
   const [employees, setEmployees] = useState([])
   const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState(null)
 
   const load = async () => {
     const { data } = await supabase.from('employees').select('*').eq('active', true).order('name')
@@ -14,32 +16,34 @@ export default function Employees() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold">Team</h2>
-        <button onClick={() => setShowForm(true)} className="bg-brand-600 text-white rounded-xl px-4 py-2 font-semibold text-sm">+ Add Person</button>
+        <h2 className="text-xl font-bold text-gray-100">Team</h2>
+        <button onClick={() => setShowForm(true)} className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm">+ Add Person</button>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {employees.map(e => (
-          <div key={e.id} className="bg-white border rounded-xl p-3 flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-gray-100 overflow-hidden flex-shrink-0">
+          <button key={e.id} onClick={() => setEditing(e)} className="bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl p-3 flex items-center gap-3 text-left">
+            <div className="w-12 h-12 rounded-full bg-gray-800 overflow-hidden flex-shrink-0">
               {e.photo_url ? <img src={e.photo_url} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xl">🧑</div>}
             </div>
             <div className="min-w-0">
-              <p className="font-semibold text-sm truncate">{e.name}</p>
-              {e.role && <p className="text-xs text-gray-500 truncate">{e.role}</p>}
+              <p className="font-semibold text-sm truncate text-gray-100">{e.name}</p>
+              {e.role && <p className="text-xs text-gray-400 truncate">{e.role}</p>}
             </div>
-          </div>
+          </button>
         ))}
-        {employees.length === 0 && <p className="text-gray-400 text-sm col-span-full">No team members added yet.</p>}
+        {employees.length === 0 && <p className="text-gray-500 text-sm col-span-full">No team members added yet.</p>}
       </div>
       {showForm && <EmployeeForm onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); load() }} />}
+      {editing && <EmployeeForm employee={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />}
     </div>
   )
 }
 
-function EmployeeForm({ onClose, onSaved }) {
-  const [name, setName] = useState('')
-  const [role, setRole] = useState('')
-  const [phone, setPhone] = useState('')
+function EmployeeForm({ employee, onClose, onSaved }) {
+  const isEdit = !!employee
+  const [name, setName] = useState(employee?.name || '')
+  const [role, setRole] = useState(employee?.role || '')
+  const [phone, setPhone] = useState(employee?.phone || '')
   const [file, setFile] = useState(null)
   const [saving, setSaving] = useState(false)
 
@@ -48,9 +52,14 @@ function EmployeeForm({ onClose, onSaved }) {
     if (!name.trim()) return
     setSaving(true)
     try {
-      let photo_url = null
+      let photo_url = employee?.photo_url || null
       if (file) photo_url = await uploadPhoto(file, 'employees')
-      await supabase.from('employees').insert({ name: name.trim(), role: role.trim() || null, phone: phone.trim() || null, photo_url })
+      const payload = { name: name.trim(), role: role.trim() || null, phone: phone.trim() || null, photo_url }
+      if (isEdit) {
+        await supabase.from('employees').update(payload).eq('id', employee.id)
+      } else {
+        await supabase.from('employees').insert(payload)
+      }
       onSaved()
     } catch (err) {
       alert('Could not save: ' + err.message)
@@ -59,25 +68,36 @@ function EmployeeForm({ onClose, onSaved }) {
     }
   }
 
+  // "Delete" for people marks them inactive rather than hard-deleting, so past
+  // work history logged against them stays intact.
+  const remove = async () => {
+    if (!confirm(`Remove "${employee.name}" from the team? Their past work history is kept.`)) return
+    setSaving(true)
+    try {
+      await supabase.from('employees').update({ active: false }).eq('id', employee.id)
+      onSaved()
+    } catch (err) {
+      alert('Could not remove: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-30">
-      <form onSubmit={save} className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md p-5">
-        <h3 className="text-lg font-bold mb-4">Add Team Member</h3>
-        <label className="block text-sm font-medium mb-1">Photo</label>
-        <input type="file" accept="image/*" capture="user" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm" />
-        <label className="block text-sm font-medium mb-1">Name*</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} className="w-full border rounded-lg px-3 py-2 mb-3" required />
-        <label className="block text-sm font-medium mb-1">Role</label>
-        <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Embroidery Operator" className="w-full border rounded-lg px-3 py-2 mb-3" />
-        <label className="block text-sm font-medium mb-1">Phone</label>
-        <input value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full border rounded-lg px-3 py-2 mb-4" />
-        <div className="flex gap-2">
-          <button type="button" onClick={onClose} className="flex-1 border rounded-xl py-2.5 font-semibold">Cancel</button>
-          <button type="submit" disabled={saving} className="flex-1 bg-brand-600 text-white rounded-xl py-2.5 font-semibold disabled:opacity-50">
-            {saving ? 'Saving...' : 'Save'}
-          </button>
-        </div>
+    <Modal onClose={onClose}>
+      <form onSubmit={save}>
+        <h3 className="text-lg font-bold mb-4 text-gray-100">{isEdit ? 'Edit Team Member' : 'Add Team Member'}</h3>
+        {employee?.photo_url && !file && <img src={employee.photo_url} className="w-16 h-16 object-cover rounded-full mb-2" />}
+        <label className={labelClass}>Photo</label>
+        <input type="file" accept="image/*" capture="user" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm text-gray-300" />
+        <label className={labelClass}>Name*</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} className={inputClass} required />
+        <label className={labelClass}>Role</label>
+        <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Embroidery Operator" className={inputClass} />
+        <label className={labelClass}>Phone</label>
+        <input value={phone} onChange={(e) => setPhone(e.target.value)} className={inputClass} />
+        <FormActions onCancel={onClose} saving={saving} onDelete={isEdit ? remove : null} saveLabel={isEdit ? 'Save' : 'Add'} />
       </form>
-    </div>
+    </Modal>
   )
 }
