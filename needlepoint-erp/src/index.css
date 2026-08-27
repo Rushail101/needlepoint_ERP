@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  -webkit-tap-highlight-color: transparent;
+  background-color: #15121A;
+  color: #F3EDE7;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Big, thumb-friendly touch targets everywhere by default */
+button, select, input, textarea {
+  font-size: 16px;
+}
+
+h1, h2, h3, .font-display {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+}
+
+/* Signature motif: a dashed "running stitch" seam, used as a top accent on
+   cards and section dividers throughout the app. */
+.seam-top {
+  border-top-width: 2px;
+  border-top-style: dashed;
+  border-top-color: rgba(240, 128, 60, 0.45);
+}
+
+.seam-divider {
+  border-bottom-width: 1px;
+  border-bottom-style: dashed;
+  border-bottom-color: rgba(61, 53, 66, 1);
+}
+
+/* Slim dark scrollbars so horizontal filter/tab strips feel native to the theme */
+::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3D3542;
+  border-radius: 999px;
+}
+
+input::placeholder, textarea::placeholder {
+  color: #A79CAE;
+  opacity: 0.7;
+}
