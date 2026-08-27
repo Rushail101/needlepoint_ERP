@@ -15,15 +15,15 @@ const navItems = [
 
 function Nav() {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around py-2 sm:static sm:border-t-0 sm:border-b sm:py-0 sm:px-6 z-20">
+    <nav className="fixed bottom-0 left-0 right-0 bg-ink-900 border-t border-ink-700 flex justify-around py-2 sm:static sm:border-t-0 sm:border-b sm:py-0 sm:px-6 z-20">
       {navItems.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}
           end={item.to === '/'}
           className={({ isActive }) =>
-            `flex flex-col sm:flex-row items-center gap-0 sm:gap-2 px-3 py-2 sm:py-4 text-xs sm:text-sm font-medium rounded-lg ${
-              isActive ? 'text-brand-600' : 'text-gray-500'
+            `flex flex-col sm:flex-row items-center gap-0 sm:gap-2 px-3 py-2 sm:py-4 text-xs sm:text-sm font-medium rounded-lg transition-colors ${
+              isActive ? 'text-thread-500' : 'text-paper-400 hover:text-paper-100'
             }`
           }
         >
@@ -38,9 +38,9 @@ function Nav() {
 export default function App() {
   return (
     <PinGate>
-      <div className="min-h-screen bg-gray-50 pb-20 sm:pb-0">
-        <header className="bg-white border-b px-4 py-3 flex items-center justify-between">
-          <h1 className="text-lg font-bold text-brand-700">Needle Point</h1>
+      <div className="min-h-screen bg-ink-950 text-paper-100 pb-20 sm:pb-0">
+        <header className="bg-ink-900 seam-top border-b border-ink-700 px-4 py-3 flex items-center justify-between">
+          <h1 className="text-lg font-bold font-display text-paper-100 tracking-tight">Needle Point</h1>
         </header>
         <Nav />
         <main className="max-w-5xl mx-auto p-4">
