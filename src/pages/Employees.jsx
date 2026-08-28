@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
 
@@ -22,22 +21,15 @@ export default function Employees() {
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {employees.map(e => (
-          <div key={e.id} className="bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl p-3 flex items-center gap-3 relative">
-            <button
-              onClick={() => setEditing(e)}
-              className="absolute top-1.5 right-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
-              aria-label="Edit team member"
-            >✎</button>
-            <Link to={`/employees/${e.id}`} className="flex items-center gap-3 min-w-0 flex-1">
-              <div className="w-12 h-12 rounded-full bg-gray-800 overflow-hidden flex-shrink-0">
-                {e.photo_url ? <img src={e.photo_url} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xl">🧑</div>}
-              </div>
-              <div className="min-w-0">
-                <p className="font-semibold text-sm truncate text-gray-100">{e.name}</p>
-                {e.role && <p className="text-xs text-gray-400 truncate">{e.role}</p>}
-              </div>
-            </Link>
-          </div>
+          <button key={e.id} onClick={() => setEditing(e)} className="bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl p-3 flex items-center gap-3 text-left">
+            <div className="w-12 h-12 rounded-full bg-gray-800 overflow-hidden flex-shrink-0">
+              {e.photo_url ? <img src={e.photo_url} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xl">🧑</div>}
+            </div>
+            <div className="min-w-0">
+              <p className="font-semibold text-sm truncate text-gray-100">{e.name}</p>
+              {e.role && <p className="text-xs text-gray-400 truncate">{e.role}</p>}
+            </div>
+          </button>
         ))}
         {employees.length === 0 && <p className="text-gray-500 text-sm col-span-full">No team members added yet.</p>}
       </div>

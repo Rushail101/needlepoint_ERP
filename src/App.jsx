@@ -1,16 +1,13 @@
 import { Routes, Route, NavLink } from 'react-router-dom'
 import PinGate from './components/PinGate.jsx'
-import Dashboard from './pages/Dashboard.jsx'
 import Products from './pages/Products.jsx'
 import ProductDetail from './pages/ProductDetail.jsx'
 import Brands from './pages/Brands.jsx'
 import Employees from './pages/Employees.jsx'
-import EmployeeSummary from './pages/EmployeeSummary.jsx'
 import WorkLog from './pages/WorkLog.jsx'
 
 const navItems = [
-  { to: '/', label: 'Home', icon: '🏠' },
-  { to: '/garments', label: 'Garments', icon: '👕' },
+  { to: '/', label: 'Garments', icon: '👕' },
   { to: '/brands', label: 'Brands', icon: '🏷️' },
   { to: '/employees', label: 'Team', icon: '👥' },
   { to: '/worklog', label: 'Work Log', icon: '📋' },
@@ -18,19 +15,19 @@ const navItems = [
 
 function Nav() {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 flex justify-around py-2 sm:static sm:border-t-0 sm:border-b sm:py-0 sm:px-4 z-20">
+    <nav className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 flex justify-around py-2 sm:static sm:border-t-0 sm:border-b sm:py-0 sm:px-6 z-20">
       {navItems.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}
           end={item.to === '/'}
           className={({ isActive }) =>
-            `flex flex-col sm:flex-row items-center gap-0 sm:gap-1.5 px-2 py-2 sm:py-4 text-[11px] sm:text-sm font-medium rounded-lg ${
+            `flex flex-col sm:flex-row items-center gap-0 sm:gap-2 px-3 py-2 sm:py-4 text-xs sm:text-sm font-medium rounded-lg ${
               isActive ? 'text-brand-500' : 'text-gray-500'
             }`
           }
         >
-          <span className="text-lg sm:text-base">{item.icon}</span>
+          <span className="text-xl sm:text-base">{item.icon}</span>
           <span>{item.label}</span>
         </NavLink>
       ))}
@@ -48,12 +45,10 @@ export default function App() {
         <Nav />
         <main className="max-w-5xl mx-auto p-4">
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/garments" element={<Products />} />
+            <Route path="/" element={<Products />} />
             <Route path="/products/:id" element={<ProductDetail />} />
             <Route path="/brands" element={<Brands />} />
             <Route path="/employees" element={<Employees />} />
-            <Route path="/employees/:id" element={<EmployeeSummary />} />
             <Route path="/worklog" element={<WorkLog />} />
           </Routes>
         </main>

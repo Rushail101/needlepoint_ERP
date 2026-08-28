@@ -23,7 +23,6 @@ create table products (
   style_code text,                  -- internal/brand style code
   cover_photo_url text,             -- main photo shown in grids
   status text default 'in_production', -- in_production | sampling | completed | on_hold
-  stage text default 'cutting',     -- cutting | printing_embroidery | stitching | qc | packed
   notes text,
   created_at timestamptz default now()
 );
