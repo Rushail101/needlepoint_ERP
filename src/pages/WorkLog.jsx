@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
 
@@ -12,6 +13,8 @@ const WORK_TYPES = [
 ]
 
 export default function WorkLog() {
+  const [searchParams] = useSearchParams()
+  const preselectProductId = searchParams.get('product')
   const [step, setStep] = useState(1) // 1: pick garment, 2: pick person, 3: pick work type + details
   const [products, setProducts] = useState([])
   const [employees, setEmployees] = useState([])
@@ -30,6 +33,12 @@ export default function WorkLog() {
     const { data: e } = await supabase.from('employees').select('*').eq('active', true).order('name')
     const { data: l } = await supabase.from('work_logs').select('*, products(name, cover_photo_url), employees(name)').order('logged_at', { ascending: false }).limit(10)
     setProducts(p || []); setEmployees(e || []); setRecentLogs(l || [])
+
+    // If we arrived via a garment's QR code, jump straight to picking a person for it.
+    if (preselectProductId) {
+      const match = (p || []).find(prod => prod.id === preselectProductId)
+      if (match) { setSelectedProduct(match); setStep(2) }
+    }
   }
   useEffect(() => { loadAll() }, [])
 

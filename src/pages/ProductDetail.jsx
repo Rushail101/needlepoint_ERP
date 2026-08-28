@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
+import { STAGES } from '../stages.js'
+import { exportProductPDF } from '../pdfExport.js'
+import ProductQR from '../components/ProductQR.jsx'
 
 const WORK_TYPE_LABEL = {
   screen_printing: 'Screen Printing',
@@ -40,11 +43,28 @@ export default function ProductDetail() {
 
   const totalQty = sizes.reduce((sum, s) => sum + (s.quantity || 0), 0)
 
+  const changeStage = async (newStage) => {
+    await supabase.from('products').update({ stage: newStage }).eq('id', id)
+    load()
+  }
+
+  const [exporting, setExporting] = useState(false)
+  const doExport = async () => {
+    setExporting(true)
+    try {
+      await exportProductPDF({ product, sizes, photos, logs, samples, workTypeLabel: WORK_TYPE_LABEL })
+    } catch (err) {
+      alert('Could not export PDF: ' + err.message)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div>
-      <Link to="/" className="text-brand-500 text-sm font-medium">← Back to Garments</Link>
+      <Link to="/garments" className="text-brand-500 text-sm font-medium">← Back to Garments</Link>
 
-      <div className="flex gap-4 mt-3 mb-4 items-start">
+      <div className="flex gap-4 mt-3 mb-3 items-start">
         <div className="w-24 h-24 rounded-xl bg-gray-800 overflow-hidden flex-shrink-0">
           {product.cover_photo_url
             ? <img src={product.cover_photo_url} className="w-full h-full object-cover" />
@@ -60,6 +80,20 @@ export default function ProductDetail() {
           Edit
         </button>
       </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <label className="text-xs text-gray-500">Stage:</label>
+        <select value={product.stage || 'cutting'} onChange={(e) => changeStage(e.target.value)}
+          className="bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-2 py-1.5 text-sm">
+          {STAGES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+        <button onClick={doExport} disabled={exporting}
+          className="ml-auto bg-gray-800 border border-gray-700 hover:border-gray-600 text-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50">
+          {exporting ? 'Exporting...' : '📄 Export PDF'}
+        </button>
+      </div>
+
+      <ProductQR productId={product.id} />
 
       <div className="flex gap-1 border-b border-gray-800 mb-4 overflow-x-auto">
         {[
@@ -86,7 +120,7 @@ export default function ProductDetail() {
           brands={brands}
           onClose={() => setEditingProduct(false)}
           onSaved={() => { setEditingProduct(false); load() }}
-          onDeleted={() => navigate('/')}
+          onDeleted={() => navigate('/garments')}
         />
       )}
     </div>

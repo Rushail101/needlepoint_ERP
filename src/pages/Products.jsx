@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
+import { STAGES, stageInfo } from '../stages.js'
 
 const STATUS_LABEL = {
   in_production: { text: 'In Production', color: 'bg-blue-900/50 text-blue-300' },
@@ -17,6 +18,7 @@ export default function Products() {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
   const [filterBrand, setFilterBrand] = useState('')
+  const [search, setSearch] = useState('')
 
   const load = async () => {
     setLoading(true)
@@ -32,7 +34,15 @@ export default function Products() {
 
   useEffect(() => { load() }, [])
 
-  const filtered = filterBrand ? products.filter(p => p.brand_id === filterBrand) : products
+  const filtered = products
+    .filter(p => (filterBrand ? p.brand_id === filterBrand : true))
+    .filter(p => {
+      if (!search.trim()) return true
+      const q = search.trim().toLowerCase()
+      return p.name?.toLowerCase().includes(q) ||
+        p.style_code?.toLowerCase().includes(q) ||
+        p.brands?.name?.toLowerCase().includes(q)
+    })
 
   return (
     <div>
@@ -45,6 +55,13 @@ export default function Products() {
           + Add Garment
         </button>
       </div>
+
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search by name, style code, or brand..."
+        className="w-full bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+      />
 
       {brands.length > 0 && (
         <div className="flex gap-2 overflow-x-auto pb-3 mb-2">
@@ -86,11 +103,16 @@ export default function Products() {
                 <div className="p-2.5">
                   <p className="font-semibold text-sm truncate text-gray-100">{p.name}</p>
                   <p className="text-xs text-gray-400 truncate">{p.brands?.name || 'No brand'}</p>
-                  {p.status && (
-                    <span className={`inline-block mt-1.5 text-[11px] px-2 py-0.5 rounded-full ${STATUS_LABEL[p.status]?.color || 'bg-gray-800 text-gray-400'}`}>
-                      {STATUS_LABEL[p.status]?.text || p.status}
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {p.status && (
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full ${STATUS_LABEL[p.status]?.color || 'bg-gray-800 text-gray-400'}`}>
+                        {STATUS_LABEL[p.status]?.text || p.status}
+                      </span>
+                    )}
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${stageInfo(p.stage).color}`}>
+                      {stageInfo(p.stage).label}
                     </span>
-                  )}
+                  </div>
                 </div>
               </Link>
             </div>
@@ -123,6 +145,7 @@ function GarmentForm({ brands, product, onClose, onSaved }) {
   const [styleCode, setStyleCode] = useState(product?.style_code || '')
   const [brandId, setBrandId] = useState(product?.brand_id || brands[0]?.id || '')
   const [status, setStatus] = useState(product?.status || 'in_production')
+  const [stage, setStage] = useState(product?.stage || 'cutting')
   const [file, setFile] = useState(null)
   const [saving, setSaving] = useState(false)
 
@@ -138,6 +161,7 @@ function GarmentForm({ brands, product, onClose, onSaved }) {
         style_code: styleCode.trim() || null,
         brand_id: brandId || null,
         status,
+        stage,
         cover_photo_url,
       }
       if (isEdit) {
@@ -199,6 +223,11 @@ function GarmentForm({ brands, product, onClose, onSaved }) {
           <option value="sampling">Sampling</option>
           <option value="completed">Completed</option>
           <option value="on_hold">On Hold</option>
+        </select>
+
+        <label className={labelClass}>Production stage</label>
+        <select value={stage} onChange={(e) => setStage(e.target.value)} className={inputClass}>
+          {STAGES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
         </select>
 
         <FormActions onCancel={onClose} saving={saving} onDelete={isEdit ? remove : null} />
