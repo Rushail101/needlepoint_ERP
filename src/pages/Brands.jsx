@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
+import { useAuth } from '../components/PinGate.jsx'
+import { can } from '../permissions.js'
 
 export default function Brands() {
+  const { user } = useAuth()
+  const canEdit = can(user, 'manage_brands')
   const [brands, setBrands] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -17,11 +21,12 @@ export default function Brands() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-gray-100">Brands</h2>
-        <button onClick={() => setShowForm(true)} className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm">+ Add Brand</button>
+        {canEdit && <button onClick={() => setShowForm(true)} className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm">+ Add Brand</button>}
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {brands.map(b => (
-          <button key={b.id} onClick={() => setEditing(b)} className="bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl p-3 flex items-center gap-3 text-left">
+          <div key={b.id} onClick={canEdit ? () => setEditing(b) : undefined}
+            className={`bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center gap-3 text-left ${canEdit ? 'hover:border-gray-700 cursor-pointer' : ''}`}>
             <div className="w-12 h-12 rounded-lg bg-gray-800 overflow-hidden flex-shrink-0">
               {b.logo_url ? <img src={b.logo_url} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xl">🏷️</div>}
             </div>
@@ -29,12 +34,12 @@ export default function Brands() {
               <p className="font-semibold text-sm truncate text-gray-100">{b.name}</p>
               {b.contact_person && <p className="text-xs text-gray-400 truncate">{b.contact_person}</p>}
             </div>
-          </button>
+          </div>
         ))}
         {brands.length === 0 && <p className="text-gray-500 text-sm col-span-full">No brands yet.</p>}
       </div>
-      {showForm && <BrandForm onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); load() }} />}
-      {editing && <BrandForm brand={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />}
+      {canEdit && showForm && <BrandForm onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); load() }} />}
+      {canEdit && editing && <BrandForm brand={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />}
     </div>
   )
 }

@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
+import { STAGES } from '../stages.js'
+import { exportProductPDF } from '../pdfExport.js'
+import ProductQR from '../components/ProductQR.jsx'
+import { useAuth } from '../components/PinGate.jsx'
+import { can } from '../permissions.js'
 
 const WORK_TYPE_LABEL = {
   screen_printing: 'Screen Printing',
@@ -15,6 +20,14 @@ const WORK_TYPE_LABEL = {
 export default function ProductDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const canEditGarment = can(user, 'edit_garments')
+  const canManageSizes = can(user, 'manage_sizes')
+  const canManagePhotos = can(user, 'manage_photos')
+  const canManageWorkLogs = can(user, 'manage_work_logs')
+  const canManageSamples = can(user, 'manage_samples')
+  const canChangeStage = can(user, 'change_stage')
+  const canExport = can(user, 'export_pdf')
   const [product, setProduct] = useState(null)
   const [brands, setBrands] = useState([])
   const [sizes, setSizes] = useState([])
@@ -23,6 +36,7 @@ export default function ProductDetail() {
   const [samples, setSamples] = useState([])
   const [tab, setTab] = useState('sizes')
   const [editingProduct, setEditingProduct] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const load = async () => {
     const { data: p } = await supabase.from('products').select('*, brands(name)').eq('id', id).single()
@@ -40,11 +54,27 @@ export default function ProductDetail() {
 
   const totalQty = sizes.reduce((sum, s) => sum + (s.quantity || 0), 0)
 
+  const changeStage = async (newStage) => {
+    await supabase.from('products').update({ stage: newStage }).eq('id', id)
+    load()
+  }
+
+  const doExport = async () => {
+    setExporting(true)
+    try {
+      await exportProductPDF({ product, sizes, photos, logs, samples, workTypeLabel: WORK_TYPE_LABEL })
+    } catch (err) {
+      alert('Could not export PDF: ' + err.message)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div>
-      <Link to="/" className="text-brand-500 text-sm font-medium">← Back to Garments</Link>
+      <Link to="/garments" className="text-brand-500 text-sm font-medium">← Back to Garments</Link>
 
-      <div className="flex gap-4 mt-3 mb-4 items-start">
+      <div className="flex gap-4 mt-3 mb-3 items-start">
         <div className="w-24 h-24 rounded-xl bg-gray-800 overflow-hidden flex-shrink-0">
           {product.cover_photo_url
             ? <img src={product.cover_photo_url} className="w-full h-full object-cover" />
@@ -55,11 +85,33 @@ export default function ProductDetail() {
           <p className="text-sm text-gray-400">{product.brands?.name || 'No brand'} {product.style_code ? `· ${product.style_code}` : ''}</p>
           <p className="text-sm text-gray-400 mt-1">Total qty: <span className="font-semibold text-gray-200">{totalQty}</span></p>
         </div>
-        <button onClick={() => setEditingProduct(true)}
-          className="bg-gray-800 border border-gray-700 hover:border-gray-600 text-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium flex-shrink-0">
-          Edit
-        </button>
+        {canEditGarment && (
+          <button onClick={() => setEditingProduct(true)}
+            className="bg-gray-800 border border-gray-700 hover:border-gray-600 text-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium flex-shrink-0">
+            Edit
+          </button>
+        )}
       </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <label className="text-xs text-gray-500">Stage:</label>
+        {canChangeStage ? (
+          <select value={product.stage || 'cutting'} onChange={(e) => changeStage(e.target.value)}
+            className="bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-2 py-1.5 text-sm">
+            {STAGES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+        ) : (
+          <span className="text-sm text-gray-300">{STAGES.find(s => s.key === (product.stage || 'cutting'))?.label}</span>
+        )}
+        {canExport && (
+          <button onClick={doExport} disabled={exporting}
+            className="ml-auto bg-gray-800 border border-gray-700 hover:border-gray-600 text-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50">
+            {exporting ? 'Exporting...' : '📄 Export PDF'}
+          </button>
+        )}
+      </div>
+
+      {canManageWorkLogs && <ProductQR productId={product.id} />}
 
       <div className="flex gap-1 border-b border-gray-800 mb-4 overflow-x-auto">
         {[
@@ -75,10 +127,10 @@ export default function ProductDetail() {
         ))}
       </div>
 
-      {tab === 'sizes' && <SizesTab productId={id} sizes={sizes} onChange={load} />}
-      {tab === 'photos' && <PhotosTab productId={id} photos={photos} onChange={load} />}
-      {tab === 'work' && <WorkTab logs={logs} onChange={load} />}
-      {tab === 'samples' && <SamplesTab productId={id} samples={samples} onChange={load} />}
+      {tab === 'sizes' && <SizesTab productId={id} sizes={sizes} onChange={load} canEdit={canManageSizes} />}
+      {tab === 'photos' && <PhotosTab productId={id} photos={photos} onChange={load} canEdit={canManagePhotos} />}
+      {tab === 'work' && <WorkTab logs={logs} onChange={load} canEdit={canManageWorkLogs} />}
+      {tab === 'samples' && <SamplesTab productId={id} samples={samples} onChange={load} canEdit={canManageSamples} />}
 
       {editingProduct && (
         <ProductForm
@@ -86,7 +138,7 @@ export default function ProductDetail() {
           brands={brands}
           onClose={() => setEditingProduct(false)}
           onSaved={() => { setEditingProduct(false); load() }}
-          onDeleted={() => navigate('/')}
+          onDeleted={() => navigate('/garments')}
         />
       )}
     </div>
@@ -162,7 +214,7 @@ function ProductForm({ product, brands, onClose, onSaved, onDeleted }) {
   )
 }
 
-function SizesTab({ productId, sizes, onChange }) {
+function SizesTab({ productId, sizes, onChange, canEdit }) {
   const [label, setLabel] = useState('')
   const [qty, setQty] = useState('')
 
@@ -194,30 +246,41 @@ function SizesTab({ productId, sizes, onChange }) {
       <div className="space-y-2 mb-4">
         {sizes.map(s => (
           <div key={s.id} className="flex items-center gap-2 bg-gray-900 border border-gray-800 rounded-xl p-3">
-            <input defaultValue={s.size_label}
-              onBlur={(e) => updateLabel(s.id, e.target.value)}
-              className="font-semibold w-16 bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-2 py-1 text-sm" />
-            <input type="number" defaultValue={s.quantity}
-              onBlur={(e) => updateQty(s.id, e.target.value)}
-              className="bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-2 py-1 w-24 text-sm" />
-            <span className="text-xs text-gray-500">pcs</span>
-            <button onClick={() => remove(s.id)} className="ml-auto text-red-400 text-sm">Remove</button>
+            {canEdit ? (
+              <>
+                <input defaultValue={s.size_label}
+                  onBlur={(e) => updateLabel(s.id, e.target.value)}
+                  className="font-semibold w-16 bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-2 py-1 text-sm" />
+                <input type="number" defaultValue={s.quantity}
+                  onBlur={(e) => updateQty(s.id, e.target.value)}
+                  className="bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-2 py-1 w-24 text-sm" />
+                <span className="text-xs text-gray-500">pcs</span>
+                <button onClick={() => remove(s.id)} className="ml-auto text-red-400 text-sm">Remove</button>
+              </>
+            ) : (
+              <>
+                <span className="font-semibold w-16 text-gray-100">{s.size_label}</span>
+                <span className="text-gray-300">{s.quantity} pcs</span>
+              </>
+            )}
           </div>
         ))}
         {sizes.length === 0 && <p className="text-gray-500 text-sm">No sizes added yet.</p>}
       </div>
-      <form onSubmit={add} className="flex gap-2">
-        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Size (e.g. M)"
-          className="bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 flex-1 text-sm" />
-        <input value={qty} onChange={(e) => setQty(e.target.value)} type="number" placeholder="Qty"
-          className="bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 w-24 text-sm" />
-        <button className="bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-4 text-sm font-semibold">Add</button>
-      </form>
+      {canEdit && (
+        <form onSubmit={add} className="flex gap-2">
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Size (e.g. M)"
+            className="bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 flex-1 text-sm" />
+          <input value={qty} onChange={(e) => setQty(e.target.value)} type="number" placeholder="Qty"
+            className="bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 w-24 text-sm" />
+          <button className="bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-4 text-sm font-semibold">Add</button>
+        </form>
+      )}
     </div>
   )
 }
 
-function PhotosTab({ productId, photos, onChange }) {
+function PhotosTab({ productId, photos, onChange, canEdit }) {
   const [uploading, setUploading] = useState(false)
 
   const upload = async (e) => {
@@ -242,16 +305,20 @@ function PhotosTab({ productId, photos, onChange }) {
 
   return (
     <div>
-      <label className="block bg-gray-900 border-2 border-dashed border-gray-700 rounded-xl p-4 text-center mb-4 text-sm text-brand-500 font-medium">
-        {uploading ? 'Uploading...' : '+ Add Photo'}
-        <input type="file" accept="image/*" capture="environment" onChange={upload} className="hidden" disabled={uploading} />
-      </label>
+      {canEdit && (
+        <label className="block bg-gray-900 border-2 border-dashed border-gray-700 rounded-xl p-4 text-center mb-4 text-sm text-brand-500 font-medium">
+          {uploading ? 'Uploading...' : '+ Add Photo'}
+          <input type="file" accept="image/*" capture="environment" onChange={upload} className="hidden" disabled={uploading} />
+        </label>
+      )}
       <div className="grid grid-cols-3 gap-2">
         {photos.map(p => (
           <div key={p.id} className="relative aspect-square rounded-lg overflow-hidden bg-gray-800">
             <img src={p.photo_url} className="w-full h-full object-cover" />
-            <button onClick={() => remove(p.id)}
-              className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-6 h-6 text-xs">✕</button>
+            {canEdit && (
+              <button onClick={() => remove(p.id)}
+                className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-6 h-6 text-xs">✕</button>
+            )}
           </div>
         ))}
       </div>
@@ -260,12 +327,14 @@ function PhotosTab({ productId, photos, onChange }) {
   )
 }
 
-function WorkTab({ logs, onChange }) {
+function WorkTab({ logs, onChange, canEdit }) {
   const [editingLog, setEditingLog] = useState(null)
+  const Row = canEdit ? 'button' : 'div'
   return (
     <div className="space-y-2">
       {logs.map(l => (
-        <button key={l.id} onClick={() => setEditingLog(l)} className="w-full bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl p-3 flex gap-3 text-left">
+        <Row key={l.id} onClick={canEdit ? () => setEditingLog(l) : undefined}
+          className="w-full bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl p-3 flex gap-3 text-left">
           {l.photo_url && <img src={l.photo_url} className="w-14 h-14 rounded-lg object-cover flex-shrink-0" />}
           <div className="min-w-0">
             <p className="font-semibold text-sm text-gray-100">{WORK_TYPE_LABEL[l.work_type] || l.work_type}</p>
@@ -273,10 +342,10 @@ function WorkTab({ logs, onChange }) {
             {l.notes && <p className="text-xs text-gray-500 mt-1">{l.notes}</p>}
             <p className="text-[11px] text-gray-600 mt-1">{new Date(l.logged_at).toLocaleString()}</p>
           </div>
-        </button>
+        </Row>
       ))}
       {logs.length === 0 && <p className="text-gray-500 text-sm">No work logged for this garment yet. Log it from the Work Log tab.</p>}
-      {editingLog && <WorkLogEditModal log={editingLog} onClose={() => setEditingLog(null)} onSaved={() => { setEditingLog(null); onChange() }} />}
+      {canEdit && editingLog && <WorkLogEditModal log={editingLog} onClose={() => setEditingLog(null)} onSaved={() => { setEditingLog(null); onChange() }} />}
     </div>
   )
 }
@@ -327,17 +396,21 @@ function WorkLogEditModal({ log, onClose, onSaved }) {
   )
 }
 
-function SamplesTab({ productId, samples, onChange }) {
+function SamplesTab({ productId, samples, onChange, canEdit }) {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
+  const Row = canEdit ? 'button' : 'div'
   return (
     <div>
-      <button onClick={() => setShowForm(true)} className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 text-sm font-semibold mb-4">
-        + Log Sample Version
-      </button>
+      {canEdit && (
+        <button onClick={() => setShowForm(true)} className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 text-sm font-semibold mb-4">
+          + Log Sample Version
+        </button>
+      )}
       <div className="space-y-3">
         {samples.map(s => (
-          <button key={s.id} onClick={() => setEditing(s)} className="w-full bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl p-3 flex gap-3 text-left">
+          <Row key={s.id} onClick={canEdit ? () => setEditing(s) : undefined}
+            className="w-full bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl p-3 flex gap-3 text-left">
             {s.photo_url && <img src={s.photo_url} className="w-16 h-16 rounded-lg object-cover flex-shrink-0" />}
             <div className="min-w-0">
               <p className="font-semibold text-sm text-gray-100">Version {s.version_number} <span className={`ml-2 text-[11px] px-2 py-0.5 rounded-full ${
@@ -348,15 +421,15 @@ function SamplesTab({ productId, samples, onChange }) {
               {s.change_description && <p className="text-xs text-gray-400 mt-1">{s.change_description}</p>}
               <p className="text-[11px] text-gray-600 mt-1">{new Date(s.created_at).toLocaleDateString()}</p>
             </div>
-          </button>
+          </Row>
         ))}
         {samples.length === 0 && <p className="text-gray-500 text-sm">No sample versions logged yet.</p>}
       </div>
-      {showForm && (
+      {canEdit && showForm && (
         <SampleForm productId={productId} nextVersion={(samples[0]?.version_number || 0) + 1}
           onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); onChange() }} />
       )}
-      {editing && (
+      {canEdit && editing && (
         <SampleForm productId={productId} sample={editing}
           onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onChange() }} />
       )}

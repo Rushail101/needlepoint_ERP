@@ -23,6 +23,7 @@ create table products (
   style_code text,                  -- internal/brand style code
   cover_photo_url text,             -- main photo shown in grids
   status text default 'in_production', -- in_production | sampling | completed | on_hold
+  stage text default 'cutting',     -- cutting | printing_embroidery | stitching | qc | packed
   notes text,
   created_at timestamptz default now()
 );
@@ -89,6 +90,16 @@ create index idx_work_logs_product on work_logs(product_id);
 create index idx_work_logs_employee on work_logs(employee_id);
 create index idx_sample_versions_product on sample_versions(product_id);
 
+-- ============ ACCESS PINS (floor manager / worker logins, managed by admin) ============
+create table access_pins (
+  id uuid primary key default uuid_generate_v4(),
+  name text not null,
+  pin text not null unique,
+  role text not null default 'worker', -- floor_manager | worker
+  active boolean default true,
+  created_at timestamptz default now()
+);
+
 -- Open RLS for MVP (single shared PIN gate at app level, not DB level).
 -- Tighten this later if you add real per-user auth.
 alter table brands enable row level security;
@@ -106,3 +117,6 @@ create policy "allow all product_sizes" on product_sizes for all using (true) wi
 create policy "allow all employees" on employees for all using (true) with check (true);
 create policy "allow all work_logs" on work_logs for all using (true) with check (true);
 create policy "allow all sample_versions" on sample_versions for all using (true) with check (true);
+
+alter table access_pins enable row level security;
+create policy "allow all access_pins" on access_pins for all using (true) with check (true);
