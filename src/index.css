@@ -4,9 +4,19 @@
 
 body {
   -webkit-tap-highlight-color: transparent;
+  background-color: #0a0e17;
+  color: #f3f4f6;
 }
 
-/* Big, thumb-friendly touch targets everywhere by default */
-button, select, input {
+button, select, input, textarea {
   font-size: 16px;
+}
+
+/* Dark-friendly scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
+
+input, select, textarea {
+  color-scheme: dark;
 }
