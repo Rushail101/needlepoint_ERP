@@ -96,6 +96,7 @@ create table access_pins (
   name text not null,
   pin text not null unique,
   role text not null default 'worker', -- floor_manager | worker
+  employee_id uuid references employees(id) on delete set null,
   active boolean default true,
   created_at timestamptz default now()
 );

@@ -5,12 +5,17 @@ import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.
 
 export default function Employees() {
   const [employees, setEmployees] = useState([])
+  const [accessByEmployee, setAccessByEmployee] = useState({})
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
 
   const load = async () => {
     const { data } = await supabase.from('employees').select('*').eq('active', true).order('name')
     setEmployees(data || [])
+    const { data: access } = await supabase.from('access_pins').select('employee_id, role, active').not('employee_id', 'is', null)
+    const map = {}
+    ;(access || []).forEach(a => { map[a.employee_id] = a })
+    setAccessByEmployee(map)
   }
   useEffect(() => { load() }, [])
 
@@ -35,6 +40,14 @@ export default function Employees() {
               <div className="min-w-0">
                 <p className="font-semibold text-sm truncate text-gray-100">{e.name}</p>
                 {e.role && <p className="text-xs text-gray-400 truncate">{e.role}</p>}
+                {accessByEmployee[e.id] && (
+                  <span className={`inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded-full ${
+                    !accessByEmployee[e.id].active ? 'bg-gray-800 text-gray-500' :
+                    accessByEmployee[e.id].role === 'floor_manager' ? 'bg-blue-900/50 text-blue-300' : 'bg-gray-800 text-gray-400'
+                  }`}>
+                    🔑 {accessByEmployee[e.id].active ? (accessByEmployee[e.id].role === 'floor_manager' ? 'Floor Manager' : 'Worker') : 'Access disabled'}
+                  </span>
+                )}
               </div>
             </Link>
           </div>
