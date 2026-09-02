@@ -4,6 +4,8 @@ import { supabase, uploadPhoto } from '../supabaseClient.js'
 import { inputClass, labelClass } from '../components/Modal.jsx'
 import { WORK_TYPES } from '../workTypes.js'
 
+const SIZE_PRESETS = ['Free Size', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']
+
 async function generateNextPoNumber(brandName) {
   const prefix = brandName
     ? brandName.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 4)
@@ -80,14 +82,7 @@ export default function NewOrder() {
       prev.map((item, idx) => {
         if (idx !== itemIndex) return item
         if (!gId || !g) {
-          return {
-            ...item,
-            pickedGarmentId: '',
-            name: '',
-            styleCode: '',
-            coverPhotoUrl: null,
-            file: null,
-          }
+          return { ...item, pickedGarmentId: '', name: '', styleCode: '', coverPhotoUrl: null, file: null }
         }
         return {
           ...item,
@@ -107,6 +102,7 @@ export default function NewOrder() {
     setItems(items.filter((_, idx) => idx !== index))
   }
 
+  // Size operations
   const updateSize = (itemIdx, sizeIdx, field, value) => {
     setItems(prev =>
       prev.map((item, idx) => {
@@ -139,6 +135,24 @@ export default function NewOrder() {
     )
   }
 
+  // Quick Preset Click Handler
+  const handlePresetClick = (itemIdx, preset) => {
+    const item = items[itemIdx]
+    const exists = item.sizes.some(s => s.size_label.toLowerCase() === preset.toLowerCase())
+    if (exists) return
+
+    // If first row is blank, update it in place; otherwise append
+    if (item.sizes.length === 1 && !item.sizes[0].size_label && !item.sizes[0].quantity) {
+      updateSize(itemIdx, 0, 'size_label', preset)
+    } else {
+      setItems(prev =>
+        prev.map((it, i) =>
+          i === itemIdx ? { ...it, sizes: [...it.sizes, { size_label: preset, quantity: '' }] } : it
+        )
+      )
+    }
+  }
+
   const toggleWork = (itemIdx, key) => {
     setItems(prev =>
       prev.map((item, idx) => {
@@ -151,9 +165,7 @@ export default function NewOrder() {
     )
   }
 
-  const visibleGarments = brandId
-    ? savedGarments.filter(g => g.brand_id === brandId)
-    : savedGarments
+  const visibleGarments = brandId ? savedGarments.filter(g => g.brand_id === brandId) : savedGarments
 
   let grandTotalQty = 0
   let combinedSubtotal = 0
@@ -176,15 +188,9 @@ export default function NewOrder() {
     e.preventDefault()
     for (let i = 0; i < items.length; i++) {
       const item = items[i]
-      if (!item.name.trim()) {
-        setError(`Product #${i + 1} needs a name.`)
-        return
-      }
+      if (!item.name.trim()) { setError(`Product #${i + 1} needs a name.`); return }
       const validSizes = item.sizes.filter(s => s.size_label.trim() && Number(s.quantity) > 0)
-      if (validSizes.length === 0) {
-        setError(`Product #${i + 1} needs at least one size & quantity.`)
-        return
-      }
+      if (validSizes.length === 0) { setError(`Product #${i + 1} needs at least one size & quantity.`); return }
     }
 
     setError('')
@@ -214,9 +220,7 @@ export default function NewOrder() {
         const qty = validSizes.reduce((sum, s) => sum + Number(s.quantity), 0)
         const rate = item.pricePerPiece ? Number(item.pricePerPiece) : null
         const itemSubtotal = rate ? rate * qty : 0
-        const itemTotal = itemSubtotal
-          ? Math.round(itemSubtotal + (itemSubtotal * Number(gstRate)) / 100)
-          : null
+        const itemTotal = itemSubtotal ? Math.round(itemSubtotal + (itemSubtotal * Number(gstRate)) / 100) : null
 
         const { data: prod, error: pErr } = await supabase
           .from('products')
@@ -301,7 +305,7 @@ export default function NewOrder() {
           </div>
         </div>
 
-        {/* Dynamic Products List */}
+        {/* Products */}
         <div className="space-y-6 mb-6">
           {items.map((item, idx) => (
             <div key={idx} className="bg-gray-900 border border-gray-800 rounded-2xl p-5 relative">
@@ -318,7 +322,7 @@ export default function NewOrder() {
                 )}
               </div>
 
-              {/* Visual Garment Selector Grid */}
+              {/* Garment Selector */}
               {visibleGarments.length > 0 && (
                 <div className="mb-4">
                   <div className="flex items-center justify-between mb-2">
@@ -385,7 +389,7 @@ export default function NewOrder() {
                 </div>
               )}
 
-              {/* Selected Photo Display */}
+              {/* Photo Preview */}
               {item.coverPhotoUrl && !item.file && (
                 <div className="w-24 aspect-square rounded-xl overflow-hidden border border-gray-800 mb-3 bg-gray-950 flex items-center justify-center">
                   <img src={item.coverPhotoUrl} alt="Preview" className="w-full h-full object-cover" />
@@ -436,8 +440,22 @@ export default function NewOrder() {
                 </div>
               )}
 
-              {/* Sizes */}
+              {/* Sizes with 1-Tap Presets */}
               <label className={labelClass}>Sizes & Quantities*</label>
+
+              <div className="flex flex-wrap gap-1.5 mb-2.5">
+                {SIZE_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => handlePresetClick(idx, preset)}
+                    className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 active:scale-95 transition"
+                  >
+                    + {preset}
+                  </button>
+                ))}
+              </div>
+
               <div className="space-y-1.5 mb-2">
                 {item.sizes.map((s, sIdx) => (
                   <div key={sIdx} className="flex gap-2">
@@ -465,7 +483,7 @@ export default function NewOrder() {
                 onClick={() => addSize(idx)}
                 className="text-brand-500 text-xs font-semibold mb-3"
               >
-                + Add size
+                + Add custom size row
               </button>
 
               {/* Work Required */}
@@ -490,7 +508,7 @@ export default function NewOrder() {
                 </div>
               </div>
 
-              {/* Per-Garment Rate */}
+              {/* Rate */}
               <div>
                 <label className={labelClass}>Rate per piece (₹)</label>
                 <input
@@ -513,7 +531,7 @@ export default function NewOrder() {
           </button>
         </div>
 
-        {/* GST Slab Selection */}
+        {/* GST Slab */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 mb-5">
           <label className={labelClass}>GST Slab (Applied to Order Total)</label>
           <div className="flex gap-2">
@@ -538,7 +556,7 @@ export default function NewOrder() {
           </div>
         </div>
 
-        {/* Batch Summary */}
+        {/* Batch Breakdown */}
         {grandTotalQty > 0 && (
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 mb-4 space-y-2 text-sm">
             <div className="flex justify-between text-gray-300">
