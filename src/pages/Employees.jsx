@@ -7,6 +7,7 @@ export default function Employees() {
   const [employees, setEmployees] = useState([])
   const [accessByEmployee, setAccessByEmployee] = useState({})
   const [weekStats, setWeekStats] = useState({})
+  const [todayLogs, setTodayLogs] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
 
@@ -31,11 +32,35 @@ export default function Employees() {
       stats[l.employee_id].pieces += l.quantity || 0
     })
     setWeekStats(stats)
+
+    const { data: today } = await supabase
+      .from('work_logs')
+      .select('*, products(name, cover_photo_url), employees(name)')
+      .order('logged_at', { ascending: false })
+    const todayStr = new Date().toDateString()
+    setTodayLogs((today || []).filter(l => new Date(l.logged_at).toDateString() === todayStr))
   }
   useEffect(() => { load() }, [])
 
   return (
     <div>
+      <h3 className="text-sm font-bold text-gray-500 mb-2 uppercase tracking-wide">Today's Activity</h3>
+      <div className="space-y-2 mb-6">
+        {todayLogs.map(l => (
+          <div key={l.id} className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-xl p-3">
+            <div className="w-10 h-10 rounded-lg bg-gray-800 overflow-hidden flex-shrink-0">
+              {l.products?.cover_photo_url && <img src={l.products.cover_photo_url} className="w-full h-full object-cover" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium truncate text-gray-100">{l.products?.name}</p>
+              <p className="text-xs text-gray-400">{l.employees?.name || 'Unassigned'} {l.quantity ? `· ${l.quantity} pcs` : ''}</p>
+            </div>
+            <p className="text-[11px] text-gray-600 flex-shrink-0">{new Date(l.logged_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+          </div>
+        ))}
+        {todayLogs.length === 0 && <p className="text-gray-500 text-sm">No work logged today yet.</p>}
+      </div>
+
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-gray-100">Team</h2>
         <button onClick={() => setShowForm(true)} className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm">+ Add Person</button>
