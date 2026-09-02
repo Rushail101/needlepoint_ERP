@@ -19,7 +19,6 @@ export default function Products() {
   const [products, setProducts] = useState([])
   const [brands, setBrands] = useState([])
   const [loading, setLoading] = useState(true)
-  const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
   const [filterBrand, setFilterBrand] = useState('')
   const [search, setSearch] = useState('')
@@ -53,18 +52,10 @@ export default function Products() {
       <div className="flex items-center justify-between mb-4 gap-2">
         <h2 className="text-xl font-bold text-gray-100">Garments</h2>
         {canEdit && (
-          <div className="flex gap-2">
-            <Link to="/orders/new"
-              className="bg-gray-800 border border-gray-700 hover:border-gray-600 text-gray-200 rounded-xl px-4 py-2 font-semibold text-sm">
-              + New Order
-            </Link>
-            <button
-              onClick={() => setShowForm(true)}
-              className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm"
-            >
-              + Add Garment
-            </button>
-          </div>
+          <Link to="/orders/new"
+            className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm">
+            + New Order
+          </Link>
         )}
       </div>
 
@@ -94,7 +85,7 @@ export default function Products() {
       {loading ? (
         <p className="text-gray-500 text-center py-10">Loading...</p>
       ) : filtered.length === 0 ? (
-        <p className="text-gray-500 text-center py-10">No garments yet. Tap "Add Garment" to start.</p>
+        <p className="text-gray-500 text-center py-10">No garments yet. Tap "New Order" to start.</p>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
           {filtered.map((p) => (
@@ -134,13 +125,6 @@ export default function Products() {
         </div>
       )}
 
-      {showForm && (
-        <GarmentForm
-          brands={brands}
-          onClose={() => setShowForm(false)}
-          onSaved={() => { setShowForm(false); load() }}
-        />
-      )}
       {editing && (
         <GarmentForm
           brands={brands}
@@ -154,12 +138,11 @@ export default function Products() {
 }
 
 function GarmentForm({ brands, product, onClose, onSaved }) {
-  const isEdit = !!product
-  const [name, setName] = useState(product?.name || '')
-  const [styleCode, setStyleCode] = useState(product?.style_code || '')
-  const [brandId, setBrandId] = useState(product?.brand_id || brands[0]?.id || '')
-  const [status, setStatus] = useState(product?.status || 'in_production')
-  const [stage, setStage] = useState(product?.stage || 'cutting')
+  const [name, setName] = useState(product.name || '')
+  const [styleCode, setStyleCode] = useState(product.style_code || '')
+  const [brandId, setBrandId] = useState(product.brand_id || '')
+  const [status, setStatus] = useState(product.status || 'in_production')
+  const [stage, setStage] = useState(product.stage || 'cutting')
   const [file, setFile] = useState(null)
   const [saving, setSaving] = useState(false)
 
@@ -168,21 +151,16 @@ function GarmentForm({ brands, product, onClose, onSaved }) {
     if (!name.trim()) return
     setSaving(true)
     try {
-      let cover_photo_url = product?.cover_photo_url || null
+      let cover_photo_url = product.cover_photo_url || null
       if (file) cover_photo_url = await uploadPhoto(file, 'products')
-      const payload = {
+      await supabase.from('products').update({
         name: name.trim(),
         style_code: styleCode.trim() || null,
         brand_id: brandId || null,
         status,
         stage,
         cover_photo_url,
-      }
-      if (isEdit) {
-        await supabase.from('products').update(payload).eq('id', product.id)
-      } else {
-        await supabase.from('products').insert(payload)
-      }
+      }).eq('id', product.id)
       onSaved()
     } catch (err) {
       alert('Could not save: ' + err.message)
@@ -207,9 +185,9 @@ function GarmentForm({ brands, product, onClose, onSaved }) {
   return (
     <Modal onClose={onClose}>
       <form onSubmit={save}>
-        <h3 className="text-lg font-bold mb-4 text-gray-100">{isEdit ? 'Edit Garment' : 'Add Garment'}</h3>
+        <h3 className="text-lg font-bold mb-4 text-gray-100">Edit Garment</h3>
 
-        {product?.cover_photo_url && !file && (
+        {product.cover_photo_url && !file && (
           <img src={product.cover_photo_url} className="w-full h-32 object-cover rounded-lg mb-2" />
         )}
         <label className={labelClass}>Photo</label>
@@ -244,7 +222,7 @@ function GarmentForm({ brands, product, onClose, onSaved }) {
           {STAGES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
         </select>
 
-        <FormActions onCancel={onClose} saving={saving} onDelete={isEdit ? remove : null} />
+        <FormActions onCancel={onClose} saving={saving} onDelete={remove} />
       </form>
     </Modal>
   )
