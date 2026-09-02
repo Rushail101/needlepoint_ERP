@@ -72,7 +72,12 @@ export default function NewOrder() {
   const totalQty = validSizes.reduce((sum, s) => sum + Number(s.quantity), 0)
   const subtotal = pricePerPiece ? Number(pricePerPiece) * totalQty : null
   const gstAmount = subtotal ? (subtotal * Number(gstRate)) / 100 : 0
-  const finalTotal = subtotal ? subtotal + gstAmount : null
+  const hasPricing = Boolean(pricePerPiece && !isNaN(Number(pricePerPiece)) && totalQty > 0)
+  const subtotal = hasPricing ? Number(pricePerPiece) * totalQty : 0
+  const gstAmount = hasPricing ? (subtotal * Number(gstRate)) / 100 : 0
+
+  // Round to the nearest ₹1
+  const finalTotal = hasPricing ? Math.round(subtotal + gstAmount) : 0
 
   const visibleGarments = brandId
     ? savedGarments.filter(g => g.brand_id === brandId)
@@ -374,7 +379,7 @@ export default function NewOrder() {
                 <div className="border-t border-gray-800 pt-2 mt-2 flex justify-between text-base font-bold text-gray-100">
                   <span>Grand Total:</span>
                   <span className="text-brand-400">
-                    ₹{finalTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ₹{(finalTotal ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                   </span>
                 </div>
               </>
