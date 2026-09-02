@@ -1,19 +1,19 @@
 import { Routes, Route, Navigate, NavLink } from 'react-router-dom'
 import PinGate, { useAuth } from './components/PinGate.jsx'
 import { can } from './permissions.js'
-import Dashboard from './pages/Dashboard.jsx'
-import Products from './pages/Products.jsx'
+import Orders from './pages/Orders.jsx'
 import ProductDetail from './pages/ProductDetail.jsx'
+import NewOrder from './pages/NewOrder.jsx'
+import GarmentCatalog from './pages/GarmentCatalog.jsx'
 import Brands from './pages/Brands.jsx'
 import Employees from './pages/Employees.jsx'
 import EmployeeSummary from './pages/EmployeeSummary.jsx'
 import WorkLog from './pages/WorkLog.jsx'
 import Access from './pages/Access.jsx'
-import NewOrder from './pages/NewOrder.jsx'
 
 const navItems = [
-  { to: '/', label: 'Home', icon: '🏠', need: 'view_dashboard' },
-  { to: '/garments', label: 'Garments', icon: '👕' }, // everyone can view garments
+  { to: '/', label: 'Orders', icon: '📦' }, // everyone can view orders
+  { to: '/garments', label: 'Garments', icon: '👕' }, // everyone can view the catalog
   { to: '/brands', label: 'Brands', icon: '🏷️', need: 'view_brands' },
   { to: '/employees', label: 'Team', icon: '👥', need: 'view_team' },
   { to: '/worklog', label: 'Work Log', icon: '📋', need: 'manage_work_logs' },
@@ -46,7 +46,7 @@ function Nav({ user }) {
 // Wraps a route so visiting the URL directly (not just hiding the nav tab) is also blocked.
 function Guard({ need, children }) {
   const { user } = useAuth()
-  if (need && !can(user, need)) return <Navigate to="/garments" replace />
+  if (need && !can(user, need)) return <Navigate to="/" replace />
   return children
 }
 
@@ -66,10 +66,10 @@ function Shell() {
       <Nav user={user} />
       <main className="max-w-5xl mx-auto p-4">
         <Routes>
-          <Route path="/" element={<Guard need="view_dashboard"><Dashboard /></Guard>} />
-          <Route path="/garments" element={<Products />} />
+          <Route path="/" element={<Orders />} />
           <Route path="/orders/new" element={<Guard need="edit_garments"><NewOrder /></Guard>} />
           <Route path="/products/:id" element={<ProductDetail />} />
+          <Route path="/garments" element={<GarmentCatalog />} />
           <Route path="/brands" element={<Guard need="view_brands"><Brands /></Guard>} />
           <Route path="/employees" element={<Guard need="view_team"><Employees /></Guard>} />
           <Route path="/employees/:id" element={<Guard need="view_team"><EmployeeSummary /></Guard>} />
