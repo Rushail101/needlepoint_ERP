@@ -10,35 +10,65 @@ export default function GarmentCatalog() {
   const [garments, setGarments] = useState([])
   const [brands, setBrands] = useState([])
   const [orderCounts, setOrderCounts] = useState({})
+  const [filterBrand, setFilterBrand] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
 
   const load = async () => {
     const { data: g } = await supabase.from('garments').select('*, brands(name)').order('name')
     const { data: b } = await supabase.from('brands').select('*').order('name')
-    setGarments(g || []); setBrands(b || [])
+    setGarments(g || [])
+    setBrands(b || [])
 
     const { data: orders } = await supabase.from('products').select('garment_id').not('garment_id', 'is', null)
     const counts = {}
     ;(orders || []).forEach(o => { counts[o.garment_id] = (counts[o.garment_id] || 0) + 1 })
     setOrderCounts(counts)
   }
+
   useEffect(() => { load() }, [])
+
+  const filtered = garments.filter(g => (filterBrand ? g.brand_id === filterBrand : true))
 
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-xl font-bold text-gray-100">Garments</h2>
         {canEdit && (
-          <button onClick={() => setShowForm(true)} className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm">+ Add Garment</button>
+          <button onClick={() => setShowForm(true)} className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm">
+            + Add Garment
+          </button>
         )}
       </div>
       <p className="text-sm text-gray-500 mb-4">Reusable styles — pick one when creating a new order instead of re-entering it.</p>
 
+      {brands.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto pb-3 mb-2">
+          <button
+            onClick={() => setFilterBrand('')}
+            className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${filterBrand === '' ? 'bg-brand-600 text-white' : 'bg-gray-800 border border-gray-700 text-gray-300'}`}
+          >
+            All Brands
+          </button>
+          {brands.map(b => (
+            <button
+              key={b.id}
+              onClick={() => setFilterBrand(b.id)}
+              className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${filterBrand === b.id ? 'bg-brand-600 text-white' : 'bg-gray-800 border border-gray-700 text-gray-300'}`}
+            >
+              {b.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-        {garments.map(g => (
-          <div key={g.id} onClick={canEdit ? () => setEditing(g) : undefined}
-            className={`bg-gray-900 border border-gray-800 rounded-xl overflow-hidden ${canEdit ? 'hover:border-gray-700 cursor-pointer' : ''}`}>
+        {filtered.map(g => (
+          <div
+            key={g.id}
+            onClick={canEdit ? () => setEditing(g) : undefined}
+            className={`bg-gray-900 border border-gray-800 rounded-xl overflow-hidden ${canEdit ? 'hover:border-gray-700 cursor-pointer' : ''}`}
+          >
             <div className="aspect-square bg-gray-800">
               {g.cover_photo_url ? (
                 <img src={g.cover_photo_url} alt={g.name} className="w-full h-full object-cover" />
@@ -57,7 +87,11 @@ export default function GarmentCatalog() {
             </div>
           </div>
         ))}
-        {garments.length === 0 && <p className="text-gray-500 text-sm col-span-full">No garments saved yet.</p>}
+        {filtered.length === 0 && (
+          <p className="text-gray-500 text-sm col-span-full">
+            {filterBrand ? 'No garments found for this brand.' : 'No garments saved yet.'}
+          </p>
+        )}
       </div>
 
       {showForm && <GarmentCatalogForm brands={brands} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); load() }} />}
