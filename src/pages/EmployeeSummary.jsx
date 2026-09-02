@@ -2,15 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { supabase } from '../supabaseClient.js'
 import { exportEmployeePDF } from '../pdfExport.js'
-
-const WORK_TYPE_LABEL = {
-  screen_printing: 'Screen Printing',
-  embroidery: 'Embroidery',
-  sampling: 'Sampling',
-  sample_change: 'Sample Change',
-  stitching: 'Stitching',
-  other: 'Other',
-}
+import { WORK_TYPE_LABEL } from '../workTypes.js'
 
 const RANGES = [
   { key: 'week', label: 'This Week' },
