@@ -191,7 +191,7 @@ function ProductForm({ product, brands, onClose, onSaved, onDeleted }) {
         <h3 className="text-lg font-bold mb-4 text-gray-100">Edit Garment</h3>
         {product.cover_photo_url && !file && <img src={product.cover_photo_url} className="w-full h-32 object-cover rounded-lg mb-2" />}
         <label className={labelClass}>Photo</label>
-        <input type="file" accept="image/*" capture="environment" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm text-gray-300" />
+        <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm text-gray-300" />
         <label className={labelClass}>Garment name*</label>
         <input value={name} onChange={(e) => setName(e.target.value)} className={inputClass} required />
         <label className={labelClass}>Style code</label>
@@ -308,7 +308,7 @@ function PhotosTab({ productId, photos, onChange, canEdit }) {
       {canEdit && (
         <label className="block bg-gray-900 border-2 border-dashed border-gray-700 rounded-xl p-4 text-center mb-4 text-sm text-brand-500 font-medium">
           {uploading ? 'Uploading...' : '+ Add Photo'}
-          <input type="file" accept="image/*" capture="environment" onChange={upload} className="hidden" disabled={uploading} />
+          <input type="file" accept="image/*" onChange={upload} className="hidden" disabled={uploading} />
         </label>
       )}
       <div className="grid grid-cols-3 gap-2">
@@ -485,7 +485,7 @@ function SampleForm({ productId, sample, nextVersion, onClose, onSaved }) {
         <h3 className="text-lg font-bold mb-4 text-gray-100">{isEdit ? `Edit Version ${sample.version_number}` : `Log Sample Version ${nextVersion}`}</h3>
         {sample?.photo_url && !file && <img src={sample.photo_url} className="w-full h-32 object-cover rounded-lg mb-2" />}
         <label className={labelClass}>Photo of this version</label>
-        <input type="file" accept="image/*" capture="environment" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm text-gray-300" />
+        <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm text-gray-300" />
         <label className={labelClass}>What changed</label>
         <textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={3}
           className={inputClass} placeholder="e.g. Collar width reduced, moved logo 1 inch left" />

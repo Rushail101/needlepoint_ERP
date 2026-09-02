@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { supabase } from '../supabaseClient.js'
+import { exportEmployeePDF } from '../pdfExport.js'
 
 const WORK_TYPE_LABEL = {
   screen_printing: 'Screen Printing',
@@ -17,11 +18,14 @@ const RANGES = [
   { key: 'all', label: 'All Time' },
 ]
 
+const AVG_WEEKS_PER_MONTH = 4.345
+
 export default function EmployeeSummary() {
   const { id } = useParams()
   const [employee, setEmployee] = useState(null)
   const [logs, setLogs] = useState([])
   const [range, setRange] = useState('week')
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -39,24 +43,55 @@ export default function EmployeeSummary() {
   if (!employee) return <p className="text-gray-500 text-center py-10">Loading...</p>
 
   const now = new Date()
+  const startOfWeek = new Date(now)
+  startOfWeek.setDate(now.getDate() - now.getDay())
+  startOfWeek.setHours(0, 0, 0, 0)
+
   const filtered = logs.filter(l => {
     if (range === 'all') return true
     const d = new Date(l.logged_at)
-    if (range === 'week') {
-      const startOfWeek = new Date(now)
-      startOfWeek.setDate(now.getDate() - now.getDay())
-      startOfWeek.setHours(0, 0, 0, 0)
-      return d >= startOfWeek
-    }
-    if (range === 'month') {
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
-    }
+    if (range === 'week') return d >= startOfWeek
+    if (range === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
     return true
   })
 
   const totalPieces = filtered.reduce((sum, l) => sum + (l.quantity || 0), 0)
   const byType = {}
   filtered.forEach(l => { byType[l.work_type] = (byType[l.work_type] || 0) + 1 })
+
+  // Cost per piece, using the fixed monthly salary as the base.
+  let costPerPiece = null
+  let costNote = ''
+  if (employee.monthly_salary && totalPieces > 0) {
+    if (range === 'month') {
+      costPerPiece = employee.monthly_salary / totalPieces
+      costNote = 'monthly salary ÷ pieces this month'
+    } else if (range === 'week') {
+      costPerPiece = (employee.monthly_salary / AVG_WEEKS_PER_MONTH) / totalPieces
+      costNote = 'estimated weekly share of salary ÷ pieces this week'
+    } else {
+      const firstLogDate = filtered.length ? new Date(filtered[filtered.length - 1].logged_at) : now
+      const monthsSpan = Math.max(1, Math.ceil((now - firstLogDate) / (1000 * 60 * 60 * 24 * 30)))
+      costPerPiece = (employee.monthly_salary * monthsSpan) / totalPieces
+      costNote = `estimated salary over ~${monthsSpan} month${monthsSpan > 1 ? 's' : ''} ÷ pieces all time`
+    }
+  }
+
+  const rangeLabel = RANGES.find(r => r.key === range)?.label || range
+
+  const doExport = async () => {
+    setExporting(true)
+    try {
+      await exportEmployeePDF({
+        employee, range, rangeLabel, logs: filtered, totalPieces,
+        totalEntries: filtered.length, byType, costPerPiece, workTypeLabel: WORK_TYPE_LABEL,
+      })
+    } catch (err) {
+      alert('Could not export PDF: ' + err.message)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   return (
     <div>
@@ -66,10 +101,14 @@ export default function EmployeeSummary() {
         <div className="w-16 h-16 rounded-full bg-gray-800 overflow-hidden flex-shrink-0">
           {employee.photo_url ? <img src={employee.photo_url} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-2xl">🧑</div>}
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
           <h2 className="text-xl font-bold text-gray-100">{employee.name}</h2>
           {employee.role && <p className="text-sm text-gray-400">{employee.role}</p>}
         </div>
+        <button onClick={doExport} disabled={exporting}
+          className="bg-gray-800 border border-gray-700 hover:border-gray-600 text-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 flex-shrink-0">
+          {exporting ? 'Exporting...' : '📄 Export PDF'}
+        </button>
       </div>
 
       <div className="flex gap-2 mb-4">
@@ -81,7 +120,7 @@ export default function EmployeeSummary() {
         ))}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mb-6">
+      <div className="grid grid-cols-2 gap-3 mb-3">
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
           <p className="text-2xl font-bold text-gray-100">{filtered.length}</p>
           <p className="text-xs text-gray-400 mt-1">Work entries</p>
@@ -91,6 +130,22 @@ export default function EmployeeSummary() {
           <p className="text-xs text-gray-400 mt-1">Total pieces</p>
         </div>
       </div>
+
+      {employee.monthly_salary ? (
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <p className="text-lg font-bold text-gray-100">₹{employee.monthly_salary}</p>
+            <p className="text-xs text-gray-400 mt-1">Monthly salary</p>
+          </div>
+          <div className="bg-gray-900 border border-yellow-900/50 rounded-xl p-4">
+            <p className="text-lg font-bold text-yellow-400">{costPerPiece != null ? `₹${costPerPiece.toFixed(2)}` : '—'}</p>
+            <p className="text-xs text-gray-400 mt-1">Cost per piece</p>
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-gray-600 mb-6">No monthly salary set — add one from the Team tab to see cost per piece.</p>
+      )}
+      {costNote && <p className="text-[11px] text-gray-600 -mt-4 mb-6">{costNote}</p>}
 
       {Object.keys(byType).length > 0 && (
         <div className="flex flex-wrap gap-2 mb-6">

@@ -98,3 +98,63 @@ export async function exportProductPDF({ product, sizes, photos, logs, samples, 
 
   doc.save(`${product.name.replace(/[^a-z0-9]+/gi, '_')}_summary.pdf`)
 }
+
+export async function exportEmployeePDF({ employee, range, rangeLabel, logs, totalPieces, totalEntries, byType, costPerPiece, workTypeLabel }) {
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+  const margin = 40
+  let y = 50
+
+  doc.setFontSize(20)
+  doc.text(employee.name, margin, y)
+  y += 22
+
+  doc.setFontSize(11)
+  doc.setTextColor(100)
+  if (employee.role) { doc.text(employee.role, margin, y); y += 16 }
+  doc.setTextColor(0)
+  y += 6
+
+  doc.setFontSize(12)
+  doc.text(`Summary — ${rangeLabel}`, margin, y); y += 20
+
+  doc.setFontSize(10)
+  doc.text(`Work entries: ${totalEntries}`, margin, y); y += 14
+  doc.text(`Total pieces: ${totalPieces}`, margin, y); y += 14
+  if (employee.monthly_salary) {
+    doc.text(`Monthly salary: Rs. ${employee.monthly_salary}`, margin, y); y += 14
+  }
+  if (costPerPiece != null) {
+    doc.setFont(undefined, 'bold')
+    doc.text(`Cost per piece: Rs. ${costPerPiece.toFixed(2)}`, margin, y)
+    doc.setFont(undefined, 'normal')
+    y += 14
+  }
+  y += 10
+
+  if (Object.keys(byType).length > 0) {
+    doc.setFontSize(12)
+    doc.text('By Work Type', margin, y); y += 18
+    doc.setFontSize(10)
+    Object.entries(byType).forEach(([type, count]) => {
+      doc.text(`${workTypeLabel[type] || type}: ${count}`, margin, y)
+      y += 14
+    })
+    y += 10
+  }
+
+  if (logs.length > 0) {
+    if (y > 650) { doc.addPage(); y = 50 }
+    doc.setFontSize(12)
+    doc.text('Work Log', margin, y); y += 18
+    doc.setFontSize(10)
+    for (const l of logs) {
+      if (y > 760) { doc.addPage(); y = 50 }
+      const type = workTypeLabel[l.work_type] || l.work_type
+      const qty = l.quantity ? ` · ${l.quantity} pcs` : ''
+      doc.text(`${new Date(l.logged_at).toLocaleDateString()} — ${l.products?.name || 'Unknown garment'} — ${type}${qty}`, margin, y)
+      y += 14
+    }
+  }
+
+  doc.save(`${employee.name.replace(/[^a-z0-9]+/gi, '_')}_${range}_summary.pdf`)
+}

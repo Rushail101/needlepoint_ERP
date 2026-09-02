@@ -53,6 +53,7 @@ create table employees (
   phone text,
   role text,                  -- e.g. "Embroidery Operator", "Screen Printer", "Tailor"
   photo_url text,
+  monthly_salary numeric,     -- admin-only, used to compute cost-per-piece
   active boolean default true,
   created_at timestamptz default now()
 );

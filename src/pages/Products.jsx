@@ -207,7 +207,7 @@ function GarmentForm({ brands, product, onClose, onSaved }) {
           <img src={product.cover_photo_url} className="w-full h-32 object-cover rounded-lg mb-2" />
         )}
         <label className={labelClass}>Photo</label>
-        <input type="file" accept="image/*" capture="environment"
+        <input type="file" accept="image/*"
           onChange={(e) => setFile(e.target.files[0])}
           className="w-full mb-3 text-sm text-gray-300" />
 

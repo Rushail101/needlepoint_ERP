@@ -6,16 +6,31 @@ import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.
 export default function Employees() {
   const [employees, setEmployees] = useState([])
   const [accessByEmployee, setAccessByEmployee] = useState({})
+  const [weekStats, setWeekStats] = useState({})
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
 
   const load = async () => {
     const { data } = await supabase.from('employees').select('*').eq('active', true).order('name')
     setEmployees(data || [])
+
     const { data: access } = await supabase.from('access_pins').select('employee_id, role, active').not('employee_id', 'is', null)
-    const map = {}
-    ;(access || []).forEach(a => { map[a.employee_id] = a })
-    setAccessByEmployee(map)
+    const accessMap = {}
+    ;(access || []).forEach(a => { accessMap[a.employee_id] = a })
+    setAccessByEmployee(accessMap)
+
+    const startOfWeek = new Date()
+    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay())
+    startOfWeek.setHours(0, 0, 0, 0)
+    const { data: logs } = await supabase.from('work_logs').select('employee_id, quantity').gte('logged_at', startOfWeek.toISOString())
+    const stats = {}
+    ;(logs || []).forEach(l => {
+      if (!l.employee_id) return
+      if (!stats[l.employee_id]) stats[l.employee_id] = { entries: 0, pieces: 0 }
+      stats[l.employee_id].entries += 1
+      stats[l.employee_id].pieces += l.quantity || 0
+    })
+    setWeekStats(stats)
   }
   useEffect(() => { load() }, [])
 
@@ -40,6 +55,9 @@ export default function Employees() {
               <div className="min-w-0">
                 <p className="font-semibold text-sm truncate text-gray-100">{e.name}</p>
                 {e.role && <p className="text-xs text-gray-400 truncate">{e.role}</p>}
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  {weekStats[e.id] ? `${weekStats[e.id].entries} entries · ${weekStats[e.id].pieces} pcs this week` : 'No work this week'}
+                </p>
                 {accessByEmployee[e.id] && (
                   <span className={`inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded-full ${
                     !accessByEmployee[e.id].active ? 'bg-gray-800 text-gray-500' :
@@ -65,6 +83,7 @@ function EmployeeForm({ employee, onClose, onSaved }) {
   const [name, setName] = useState(employee?.name || '')
   const [role, setRole] = useState(employee?.role || '')
   const [phone, setPhone] = useState(employee?.phone || '')
+  const [salary, setSalary] = useState(employee?.monthly_salary ?? '')
   const [file, setFile] = useState(null)
   const [saving, setSaving] = useState(false)
 
@@ -75,7 +94,13 @@ function EmployeeForm({ employee, onClose, onSaved }) {
     try {
       let photo_url = employee?.photo_url || null
       if (file) photo_url = await uploadPhoto(file, 'employees')
-      const payload = { name: name.trim(), role: role.trim() || null, phone: phone.trim() || null, photo_url }
+      const payload = {
+        name: name.trim(),
+        role: role.trim() || null,
+        phone: phone.trim() || null,
+        monthly_salary: salary === '' ? null : Number(salary),
+        photo_url,
+      }
       if (isEdit) {
         await supabase.from('employees').update(payload).eq('id', employee.id)
       } else {
@@ -110,13 +135,16 @@ function EmployeeForm({ employee, onClose, onSaved }) {
         <h3 className="text-lg font-bold mb-4 text-gray-100">{isEdit ? 'Edit Team Member' : 'Add Team Member'}</h3>
         {employee?.photo_url && !file && <img src={employee.photo_url} className="w-16 h-16 object-cover rounded-full mb-2" />}
         <label className={labelClass}>Photo</label>
-        <input type="file" accept="image/*" capture="user" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm text-gray-300" />
+        <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm text-gray-300" />
         <label className={labelClass}>Name*</label>
         <input value={name} onChange={(e) => setName(e.target.value)} className={inputClass} required />
         <label className={labelClass}>Role</label>
         <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Embroidery Operator" className={inputClass} />
         <label className={labelClass}>Phone</label>
         <input value={phone} onChange={(e) => setPhone(e.target.value)} className={inputClass} />
+        <label className={labelClass}>Monthly Salary (₹)</label>
+        <input value={salary} onChange={(e) => setSalary(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal"
+          className={inputClass} placeholder="optional — used to calculate cost per piece" />
         <FormActions onCancel={onClose} saving={saving} onDelete={isEdit ? remove : null} saveLabel={isEdit ? 'Save' : 'Add'} />
       </form>
     </Modal>

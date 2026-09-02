@@ -133,7 +133,7 @@ export default function WorkLog() {
               <input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)}
                 className={inputClass} placeholder="optional" />
               <label className={labelClass}>Photo of the work</label>
-              <input type="file" accept="image/*" capture="environment" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm text-gray-300" />
+              <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm text-gray-300" />
               <label className={labelClass}>Notes</label>
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
                 className={inputClass} placeholder="optional" />
