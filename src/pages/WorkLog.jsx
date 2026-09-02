@@ -2,15 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
-
-const WORK_TYPES = [
-  { key: 'screen_printing', label: 'Screen Printing', icon: '🖨️' },
-  { key: 'embroidery', label: 'Embroidery', icon: '🧵' },
-  { key: 'sampling', label: 'Sampling', icon: '✂️' },
-  { key: 'sample_change', label: 'Sample Change', icon: '🔁' },
-  { key: 'stitching', label: 'Stitching', icon: '🪡' },
-  { key: 'other', label: 'Other', icon: '📌' },
-]
+import { WORK_TYPES } from '../workTypes.js'
 
 export default function WorkLog() {
   const [searchParams] = useSearchParams()
