@@ -8,12 +8,12 @@ export default function NewOrder() {
   const navigate = useNavigate()
   const [brands, setBrands] = useState([])
   const [savedGarments, setSavedGarments] = useState([])
-  const [pickedGarmentId, setPickedGarmentId] = useState('') // '' = typing a new one
+  const [pickedGarmentId, setPickedGarmentId] = useState('')
 
   const [brandId, setBrandId] = useState('')
   const [name, setName] = useState('')
   const [styleCode, setStyleCode] = useState('')
-  const [coverPhotoUrl, setCoverPhotoUrl] = useState(null) // carried over when a saved garment is picked
+  const [coverPhotoUrl, setCoverPhotoUrl] = useState(null)
   const [file, setFile] = useState(null)
   const [saveToCatalog, setSaveToCatalog] = useState(true)
 
@@ -28,16 +28,33 @@ export default function NewOrder() {
     supabase.from('garments').select('*').order('name').then(({ data }) => setSavedGarments(data || []))
   }, [])
 
+  const handleBrandChange = (newBrandId) => {
+    setBrandId(newBrandId)
+    // Clear selected garment if it belongs to a different brand
+    if (pickedGarmentId) {
+      const current = savedGarments.find(g => g.id === pickedGarmentId)
+      if (current && newBrandId && current.brand_id !== newBrandId) {
+        pickGarment('')
+      }
+    }
+  }
+
   const pickGarment = (id) => {
     setPickedGarmentId(id)
     if (!id) {
-      setName(''); setStyleCode(''); setBrandId(''); setCoverPhotoUrl(null); setFile(null)
+      setName('')
+      setStyleCode('')
+      setCoverPhotoUrl(null)
+      setFile(null)
       return
     }
     const g = savedGarments.find(sg => sg.id === id)
     if (g) {
-      setName(g.name); setStyleCode(g.style_code || ''); setBrandId(g.brand_id || '')
-      setCoverPhotoUrl(g.cover_photo_url || null); setFile(null)
+      setName(g.name)
+      setStyleCode(g.style_code || '')
+      if (g.brand_id) setBrandId(g.brand_id)
+      setCoverPhotoUrl(g.cover_photo_url || null)
+      setFile(null)
     }
   }
 
@@ -55,6 +72,11 @@ export default function NewOrder() {
   const totalQty = validSizes.reduce((sum, s) => sum + Number(s.quantity), 0)
   const totalValue = pricePerPiece ? Number(pricePerPiece) * totalQty : null
 
+  // Garments filtered by active brand selection
+  const visibleGarments = brandId
+    ? savedGarments.filter(g => g.brand_id === brandId)
+    : savedGarments
+
   const submit = async (e) => {
     e.preventDefault()
     if (!name.trim()) { setError('Garment name is required.'); return }
@@ -67,8 +89,6 @@ export default function NewOrder() {
 
       let garmentId = pickedGarmentId || null
 
-      // If this is a fresh (not-picked-from-catalog) garment and the admin wants it
-      // saved for next time, create the catalog entry now and link this order to it.
       if (!garmentId && saveToCatalog) {
         const { data: newGarment, error: gErr } = await supabase.from('garments').insert({
           name: name.trim(),
@@ -110,58 +130,160 @@ export default function NewOrder() {
   }
 
   return (
-    <div>
+    <div className="max-w-2xl mx-auto pb-10">
       <Link to="/" className="text-brand-500 text-sm font-medium">← Back to Orders</Link>
       <h2 className="text-xl font-bold text-gray-100 mt-3 mb-4">New Order</h2>
 
       <form onSubmit={submit}>
-        {savedGarments.length > 0 && (
-          <>
-            <label className={labelClass}>Garment</label>
-            <select value={pickedGarmentId} onChange={(e) => pickGarment(e.target.value)} className={inputClass}>
-              <option value="">— Type a new garment below —</option>
-              {savedGarments.map(g => <option key={g.id} value={g.id}>{g.name}{g.style_code ? ` (${g.style_code})` : ''}</option>)}
-            </select>
-          </>
-        )}
-
-        {coverPhotoUrl && !file && (
-          <img src={coverPhotoUrl} className="w-full h-32 object-cover rounded-lg mb-2" />
-        )}
-
+        {/* 1. Brand Selection */}
         <label className={labelClass}>Brand</label>
-        <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className={inputClass} disabled={!!pickedGarmentId}>
-          <option value="">No brand</option>
+        <select
+          value={brandId}
+          onChange={(e) => handleBrandChange(e.target.value)}
+          className={`${inputClass} mb-4`}
+        >
+          <option value="">All Brands / No brand</option>
           {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
 
+        {/* 2. Visual Garment Card Selector */}
+        <div className="mb-5">
+          <div className="flex items-center justify-between mb-2">
+            <label className={labelClass}>Select Existing Garment</label>
+            {pickedGarmentId && (
+              <button
+                type="button"
+                onClick={() => pickGarment('')}
+                className="text-xs text-brand-400 hover:underline"
+              >
+                Clear Selection (Create New)
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 max-h-64 overflow-y-auto p-1 bg-gray-950/40 rounded-xl border border-gray-800">
+            {/* Custom Entry Card */}
+            <button
+              type="button"
+              onClick={() => pickGarment('')}
+              className={`p-2.5 rounded-lg border text-left flex flex-col items-center justify-center text-center transition ${
+                !pickedGarmentId
+                  ? 'border-brand-500 bg-brand-950/20 text-brand-300'
+                  : 'border-gray-800 bg-gray-900/60 text-gray-400 hover:border-gray-700'
+              }`}
+            >
+              <span className="text-2xl mb-1">✍️</span>
+              <span className="text-xs font-semibold leading-tight">New / Custom Garment</span>
+            </button>
+
+            {visibleGarments.map(g => {
+              const isSelected = pickedGarmentId === g.id
+              return (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => pickGarment(isSelected ? '' : g.id)}
+                  className={`group rounded-lg border overflow-hidden text-left transition flex flex-col bg-gray-900 ${
+                    isSelected
+                      ? 'border-brand-500 ring-2 ring-brand-500/50'
+                      : 'border-gray-800 hover:border-gray-700'
+                  }`}
+                >
+                  <div className="aspect-square w-full bg-gray-800 flex items-center justify-center overflow-hidden">
+                    {g.cover_photo_url ? (
+                      <img
+                        src={g.cover_photo_url}
+                        alt={g.name}
+                        className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
+                      />
+                    ) : (
+                      <span className="text-2xl text-gray-600">👕</span>
+                    )}
+                  </div>
+                  <div className="p-2 w-full">
+                    <p className="text-xs font-medium text-gray-100 truncate">{g.name}</p>
+                    {g.style_code && (
+                      <p className="text-[10px] text-gray-400 truncate">{g.style_code}</p>
+                    )}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+
+          {visibleGarments.length === 0 && (
+            <p className="text-xs text-gray-500 mt-1">No catalog garments found for this brand.</p>
+          )}
+        </div>
+
+        {/* 3. Selected or Uploaded Photo Preview (Natural Aspect Ratio) */}
+        {coverPhotoUrl && !file && (
+          <div className="mb-4">
+            <label className={labelClass}>Garment Image</label>
+            <div className="w-40 aspect-square rounded-xl overflow-hidden border border-gray-800 bg-gray-900 flex items-center justify-center">
+              <img src={coverPhotoUrl} alt="Preview" className="w-full h-full object-cover" />
+            </div>
+          </div>
+        )}
+
+        {/* 4. Garment Details */}
         <label className={labelClass}>Garment name*</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} className={inputClass}
-          placeholder="e.g. Oversized Hoodie - Navy" disabled={!!pickedGarmentId} required />
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className={inputClass}
+          placeholder="e.g. Oversized Hoodie - Navy"
+          disabled={!!pickedGarmentId}
+          required
+        />
 
         <label className={labelClass}>Style code</label>
-        <input value={styleCode} onChange={(e) => setStyleCode(e.target.value)} className={inputClass}
-          placeholder="optional" disabled={!!pickedGarmentId} />
+        <input
+          value={styleCode}
+          onChange={(e) => setStyleCode(e.target.value)}
+          className={inputClass}
+          placeholder="optional"
+          disabled={!!pickedGarmentId}
+        />
 
         {!pickedGarmentId && (
           <>
             <label className={labelClass}>Photo</label>
-            <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm text-gray-300" />
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => setFile(e.target.files[0])}
+              className="w-full mb-3 text-sm text-gray-300"
+            />
             <label className="flex items-center gap-2 mb-4 text-sm text-gray-300">
-              <input type="checkbox" checked={saveToCatalog} onChange={(e) => setSaveToCatalog(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={saveToCatalog}
+                onChange={(e) => setSaveToCatalog(e.target.checked)}
+              />
               Save this as a garment for future repeat orders
             </label>
           </>
         )}
 
+        {/* 5. Sizes & Quantities */}
         <label className={labelClass}>Sizes & Quantities*</label>
         <div className="space-y-2 mb-2">
           {sizes.map((s, i) => (
             <div key={i} className="flex gap-2">
-              <input value={s.size_label} onChange={(e) => updateSize(i, 'size_label', e.target.value)}
-                placeholder="Size (e.g. M)" className="bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 flex-1 text-sm" />
-              <input value={s.quantity} onChange={(e) => updateSize(i, 'quantity', e.target.value.replace(/\D/g, ''))}
-                inputMode="numeric" placeholder="Qty" className="bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 w-24 text-sm" />
+              <input
+                value={s.size_label}
+                onChange={(e) => updateSize(i, 'size_label', e.target.value)}
+                placeholder="Size (e.g. M)"
+                className="bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 flex-1 text-sm"
+              />
+              <input
+                value={s.quantity}
+                onChange={(e) => updateSize(i, 'quantity', e.target.value.replace(/\D/g, ''))}
+                inputMode="numeric"
+                placeholder="Qty"
+                className="bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 w-24 text-sm"
+              />
               {sizes.length > 1 && (
                 <button type="button" onClick={() => removeSizeRow(i)} className="text-red-400 text-sm px-2">✕</button>
               )}
@@ -170,20 +292,35 @@ export default function NewOrder() {
         </div>
         <button type="button" onClick={addSizeRow} className="text-brand-500 text-sm font-medium mb-4">+ Add another size</button>
 
+        {/* 6. Work Required */}
         <label className={labelClass}>Work required</label>
         <div className="grid grid-cols-3 gap-2 mb-4">
           {WORK_TYPES.map(w => (
-            <button key={w.key} type="button" onClick={() => toggleWork(w.key)}
-              className={`border rounded-xl p-3 flex flex-col items-center gap-1 ${plannedWork.includes(w.key) ? 'bg-brand-600 text-white border-brand-600' : 'bg-gray-900 border-gray-800 text-gray-200'}`}>
+            <button
+              key={w.key}
+              type="button"
+              onClick={() => toggleWork(w.key)}
+              className={`border rounded-xl p-3 flex flex-col items-center gap-1 ${
+                plannedWork.includes(w.key)
+                  ? 'bg-brand-600 text-white border-brand-600'
+                  : 'bg-gray-900 border-gray-800 text-gray-200'
+              }`}
+            >
               <span className="text-xl">{w.icon}</span>
               <span className="text-xs font-medium text-center">{w.label}</span>
             </button>
           ))}
         </div>
 
+        {/* 7. Pricing */}
         <label className={labelClass}>Price per piece (₹)</label>
-        <input value={pricePerPiece} onChange={(e) => setPricePerPiece(e.target.value.replace(/[^0-9.]/g, ''))}
-          inputMode="decimal" className={inputClass} placeholder="optional — used for the order summary" />
+        <input
+          value={pricePerPiece}
+          onChange={(e) => setPricePerPiece(e.target.value.replace(/[^0-9.]/g, ''))}
+          inputMode="decimal"
+          className={inputClass}
+          placeholder="optional — used for the order summary"
+        />
 
         {(totalQty > 0 || totalValue) && (
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
@@ -196,8 +333,11 @@ export default function NewOrder() {
 
         {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
 
-        <button type="submit" disabled={saving}
-          className="w-full bg-brand-600 hover:bg-brand-700 text-white rounded-xl py-3 font-semibold disabled:opacity-50">
+        <button
+          type="submit"
+          disabled={saving}
+          className="w-full bg-brand-600 hover:bg-brand-700 text-white rounded-xl py-3 font-semibold disabled:opacity-50"
+        >
           {saving ? 'Creating...' : 'Create Order'}
         </button>
       </form>
