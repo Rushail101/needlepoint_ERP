@@ -1,9 +1,9 @@
-import { createContext, useContext, useState, useEffect } from 'react'
+import { createContext, useContext, useState } from 'react'
 import { supabase } from '../supabaseClient.js'
 
 const AuthContext = createContext(null)
 
-export function AuthProvider({ children }) {
+export function PinGate({ children }) {
   const [user, setUser] = useState(() => {
     const saved = localStorage.getItem('np_user')
     return saved ? JSON.parse(saved) : null
@@ -25,7 +25,7 @@ export function AuthProvider({ children }) {
     const userData = {
       id: data.id,
       name: data.name,
-      role: data.role.toLowerCase(), // 'admin' or 'floor_manager'
+      role: data.role.toLowerCase(),
       employeeId: data.employee_id,
     }
 
@@ -46,7 +46,9 @@ export function AuthProvider({ children }) {
   )
 }
 
+export const AuthProvider = PinGate
 export const useAuth = () => useContext(AuthContext)
+export default PinGate
 
 function PinLoginScreen({ onLogin }) {
   const [pin, setPin] = useState('')
@@ -81,7 +83,6 @@ function PinLoginScreen({ onLogin }) {
         <h1 className="text-xl font-bold text-gray-100 mb-1">Needle Point</h1>
         <p className="text-xs text-gray-400 mb-6">Enter PIN to Unlock</p>
 
-        {/* PIN Indicators */}
         <div className="flex justify-center gap-3 mb-6">
           {[0, 1, 2, 3].map((i) => (
             <div
@@ -97,7 +98,6 @@ function PinLoginScreen({ onLogin }) {
 
         {error && <p className="text-xs text-red-400 mb-4">{error}</p>}
 
-        {/* Numpad */}
         <div className="grid grid-cols-3 gap-2.5 mb-4">
           {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
             <button
@@ -144,10 +144,3 @@ function PinLoginScreen({ onLogin }) {
     </div>
   )
 }
-
-// Alias AuthProvider as PinGate for backwards compatibility with App.jsx
-export function PinGate({ children }) {
-  return <AuthProvider>{children}</AuthProvider>
-}
-
-export default PinGate
