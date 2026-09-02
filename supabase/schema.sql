@@ -24,6 +24,8 @@ create table products (
   cover_photo_url text,             -- main photo shown in grids
   status text default 'in_production', -- in_production | sampling | completed | on_hold
   stage text default 'cutting',     -- cutting | printing_embroidery | stitching | qc | packed
+  price_per_piece numeric,          -- admin-only; used for order value & cost summaries
+  planned_work text[] default '{}', -- e.g. {screen_printing,embroidery} — what work this order needs
   notes text,
   created_at timestamptz default now()
 );

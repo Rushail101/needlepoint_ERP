@@ -53,12 +53,18 @@ export default function Products() {
       <div className="flex items-center justify-between mb-4 gap-2">
         <h2 className="text-xl font-bold text-gray-100">Garments</h2>
         {canEdit && (
-          <button
-            onClick={() => setShowForm(true)}
-            className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm"
-          >
-            + Add Garment
-          </button>
+          <div className="flex gap-2">
+            <Link to="/orders/new"
+              className="bg-gray-800 border border-gray-700 hover:border-gray-600 text-gray-200 rounded-xl px-4 py-2 font-semibold text-sm">
+              + New Order
+            </Link>
+            <button
+              onClick={() => setShowForm(true)}
+              className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm"
+            >
+              + Add Garment
+            </button>
+          </div>
         )}
       </div>
 

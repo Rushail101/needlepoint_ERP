@@ -148,8 +148,14 @@ function ProductForm({ product, brands, onClose, onSaved, onDeleted }) {
   const [styleCode, setStyleCode] = useState(product.style_code || '')
   const [brandId, setBrandId] = useState(product.brand_id || '')
   const [status, setStatus] = useState(product.status || 'in_production')
+  const [pricePerPiece, setPricePerPiece] = useState(product.price_per_piece ?? '')
+  const [plannedWork, setPlannedWork] = useState(product.planned_work || [])
   const [file, setFile] = useState(null)
   const [saving, setSaving] = useState(false)
+
+  const toggleWork = (key) => {
+    setPlannedWork(prev => prev.includes(key) ? prev.filter(w => w !== key) : [...prev, key])
+  }
 
   const save = async (e) => {
     e.preventDefault()
@@ -161,6 +167,8 @@ function ProductForm({ product, brands, onClose, onSaved, onDeleted }) {
       await supabase.from('products').update({
         name: name.trim(), style_code: styleCode.trim() || null,
         brand_id: brandId || null, status, cover_photo_url,
+        price_per_piece: pricePerPiece === '' ? null : Number(pricePerPiece),
+        planned_work: plannedWork,
       }).eq('id', product.id)
       onSaved()
     } catch (err) {
@@ -206,6 +214,22 @@ function ProductForm({ product, brands, onClose, onSaved, onDeleted }) {
           <option value="completed">Completed</option>
           <option value="on_hold">On Hold</option>
         </select>
+
+        <label className={labelClass}>Work required</label>
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          {WORK_TYPES.map(w => (
+            <button key={w.key} type="button" onClick={() => toggleWork(w.key)}
+              className={`border rounded-xl p-3 flex flex-col items-center gap-1 ${plannedWork.includes(w.key) ? 'bg-brand-600 text-white border-brand-600' : 'bg-gray-800 border-gray-700 text-gray-200'}`}>
+              <span className="text-xl">{w.icon}</span>
+              <span className="text-xs font-medium text-center">{w.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <label className={labelClass}>Price per piece (₹)</label>
+        <input value={pricePerPiece} onChange={(e) => setPricePerPiece(e.target.value.replace(/[^0-9.]/g, ''))}
+          inputMode="decimal" className={inputClass} placeholder="optional — used for the order summary" />
+
         <FormActions onCancel={onClose} saving={saving} onDelete={remove} />
       </form>
     </Modal>
