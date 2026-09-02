@@ -33,7 +33,7 @@ export default function ProductDetail() {
   const [exporting, setExporting] = useState(false)
 
   const load = async () => {
-    const { data: p } = await supabase.from('products').select('*, brands(name)').eq('id', id).single()
+    const { data: p } = await supabase.from('products').select('*, brands(name, contact_phone)').eq('id', id).single()
     const { data: b } = await supabase.from('brands').select('*').order('name')
     const { data: s } = await supabase.from('product_sizes').select('*').eq('product_id', id).order('created_at')
     const { data: ph } = await supabase.from('product_photos').select('*').eq('product_id', id).order('created_at', { ascending: false })
@@ -69,10 +69,10 @@ export default function ProductDetail() {
       <Link to="/" className="text-brand-500 text-sm font-medium">← Back to Orders</Link>
 
       <div className="flex gap-4 mt-3 mb-3 items-start">
-        <div className="w-24 h-24 rounded-xl bg-gray-800 overflow-hidden flex-shrink-0">
+        <div className="w-24 h-24 rounded-xl bg-gray-800 overflow-hidden flex-shrink-0 flex items-center justify-center">
           {product.cover_photo_url
             ? <img src={product.cover_photo_url} className="w-full h-full object-cover" />
-            : <div className="w-full h-full flex items-center justify-center text-3xl text-gray-600">👕</div>}
+            : <div className="text-3xl text-gray-600">👕</div>}
         </div>
         <div className="flex-1 min-w-0">
           <h2 className="text-xl font-bold text-gray-100">{product.name}</h2>
@@ -133,6 +133,7 @@ export default function ProductDetail() {
       {editingProduct && (
         <ProductForm
           product={product}
+          sizes={sizes}
           brands={brands}
           onClose={() => setEditingProduct(false)}
           onSaved={() => { setEditingProduct(false); load() }}
@@ -143,12 +144,13 @@ export default function ProductDetail() {
   )
 }
 
-function ProductForm({ product, brands, onClose, onSaved, onDeleted }) {
+function ProductForm({ product, sizes, brands, onClose, onSaved, onDeleted }) {
   const [name, setName] = useState(product.name || '')
   const [styleCode, setStyleCode] = useState(product.style_code || '')
   const [brandId, setBrandId] = useState(product.brand_id || '')
   const [status, setStatus] = useState(product.status || 'in_production')
-  const [pricePerPiece, setPricePerPiece] = useState(product.price_per_piece ?? '')
+  const [pricePerPiece, setPricePerPiece] = useState(product.price_per_piece != null ? String(product.price_per_piece) : '')
+  const [gstRate, setGstRate] = useState(product.gst_rate != null ? Number(product.gst_rate) : 5)
   const [plannedWork, setPlannedWork] = useState(product.planned_work || [])
   const [file, setFile] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -156,6 +158,12 @@ function ProductForm({ product, brands, onClose, onSaved, onDeleted }) {
   const toggleWork = (key) => {
     setPlannedWork(prev => prev.includes(key) ? prev.filter(w => w !== key) : [...prev, key])
   }
+
+  const totalQty = (sizes || []).reduce((sum, s) => sum + (Number(s.quantity) || 0), 0)
+  const hasPricing = Boolean(pricePerPiece && !isNaN(Number(pricePerPiece)) && totalQty > 0)
+  const subtotal = hasPricing ? Number(pricePerPiece) * totalQty : 0
+  const gstAmount = hasPricing ? (subtotal * Number(gstRate)) / 100 : 0
+  const finalTotal = hasPricing ? Math.round(subtotal + gstAmount) : null
 
   const save = async (e) => {
     e.preventDefault()
@@ -165,9 +173,14 @@ function ProductForm({ product, brands, onClose, onSaved, onDeleted }) {
       let cover_photo_url = product.cover_photo_url || null
       if (file) cover_photo_url = await uploadPhoto(file, 'products')
       await supabase.from('products').update({
-        name: name.trim(), style_code: styleCode.trim() || null,
-        brand_id: brandId || null, status, cover_photo_url,
+        name: name.trim(),
+        style_code: styleCode.trim() || null,
+        brand_id: brandId || null,
+        status,
+        cover_photo_url,
         price_per_piece: pricePerPiece === '' ? null : Number(pricePerPiece),
+        gst_rate: Number(gstRate),
+        total_amount: finalTotal,
         planned_work: plannedWork,
       }).eq('id', product.id)
       onSaved()
@@ -195,7 +208,11 @@ function ProductForm({ product, brands, onClose, onSaved, onDeleted }) {
     <Modal onClose={onClose}>
       <form onSubmit={save}>
         <h3 className="text-lg font-bold mb-4 text-gray-100">Edit Garment</h3>
-        {product.cover_photo_url && !file && <img src={product.cover_photo_url} className="w-full h-32 object-cover rounded-lg mb-2" />}
+        {product.cover_photo_url && !file && (
+          <div className="w-full h-36 rounded-lg overflow-hidden border border-gray-800 mb-2 flex items-center justify-center bg-gray-900">
+            <img src={product.cover_photo_url} className="w-full h-full object-cover" />
+          </div>
+        )}
         <label className={labelClass}>Photo</label>
         <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm text-gray-300" />
         <label className={labelClass}>Garment name*</label>
@@ -226,9 +243,68 @@ function ProductForm({ product, brands, onClose, onSaved, onDeleted }) {
           ))}
         </div>
 
-        <label className={labelClass}>Price per piece (₹)</label>
-        <input value={pricePerPiece} onChange={(e) => setPricePerPiece(e.target.value.replace(/[^0-9.]/g, ''))}
-          inputMode="decimal" className={inputClass} placeholder="optional — used for the order summary" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className={labelClass}>Price per piece (₹)</label>
+            <input
+              value={pricePerPiece}
+              onChange={(e) => setPricePerPiece(e.target.value.replace(/[^0-9.]/g, ''))}
+              inputMode="decimal"
+              className={inputClass}
+              placeholder="Rate before GST"
+            />
+          </div>
+          <div>
+            <label className={labelClass}>GST Slab</label>
+            <div className="flex gap-2">
+              {[
+                { label: '0%', value: 0 },
+                { label: '5%', value: 5 },
+                { label: '18%', value: 18 },
+              ].map(slab => (
+                <button
+                  key={slab.value}
+                  type="button"
+                  onClick={() => setGstRate(slab.value)}
+                  className={`flex-1 py-2 rounded-lg text-xs font-semibold border transition ${
+                    gstRate === slab.value
+                      ? 'bg-brand-600 border-brand-600 text-white'
+                      : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600'
+                  }`}
+                >
+                  {slab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {totalQty > 0 && (
+          <div className="bg-gray-950/60 border border-gray-800 rounded-xl p-3 mb-4 space-y-1.5 text-xs">
+            <div className="flex justify-between text-gray-400">
+              <span>Total Quantity:</span>
+              <span className="font-medium text-gray-200">{totalQty} pcs</span>
+            </div>
+            {hasPricing && (
+              <>
+                <div className="flex justify-between text-gray-400">
+                  <span>Subtotal (Taxable):</span>
+                  <span>₹{subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between text-gray-400">
+                  <span>GST ({gstRate}%):</span>
+                  <span>₹{gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="border-t border-gray-800 pt-1.5 mt-1 flex justify-between font-bold text-sm text-gray-100">
+                  <span>Grand Total:</span>
+                  <span className="text-brand-400">
+                    ₹{finalTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         <FormActions onCancel={onClose} saving={saving} onDelete={remove} />
       </form>
@@ -238,14 +314,37 @@ function ProductForm({ product, brands, onClose, onSaved, onDeleted }) {
 
 function OrderSummaryPanel({ product, sizes, canViewPricing, canManageWorkLogs }) {
   const totalQty = sizes.reduce((sum, s) => sum + (s.quantity || 0), 0)
-  const totalValue = product.price_per_piece ? product.price_per_piece * totalQty : null
+  const pricePerPiece = Number(product.price_per_piece || 0)
+  const subtotal = pricePerPiece > 0 && totalQty > 0 ? pricePerPiece * totalQty : 0
+  const gstRate = product.gst_rate != null ? Number(product.gst_rate) : 5
+  const gstAmount = subtotal > 0 ? (subtotal * gstRate) / 100 : 0
+  const grandTotal = product.total_amount != null
+    ? Number(product.total_amount)
+    : Math.round(subtotal + gstAmount)
 
   const share = () => {
-    const text = buildOrderSummaryText({ product, brandName: product.brands?.name, sizes })
+    const text = buildOrderSummaryText({
+      product,
+      brandName: product.brands?.name,
+      sizes,
+      subtotal,
+      gstRate,
+      gstAmount,
+      grandTotal,
+    })
     window.open(buildWhatsAppUrl(text, product.brands?.contact_phone), '_blank')
   }
+
   const copy = async () => {
-    const text = buildOrderSummaryText({ product, brandName: product.brands?.name, sizes })
+    const text = buildOrderSummaryText({
+      product,
+      brandName: product.brands?.name,
+      sizes,
+      subtotal,
+      gstRate,
+      gstAmount,
+      grandTotal,
+    })
     try {
       await navigator.clipboard.writeText(text)
       alert('Summary copied to clipboard.')
@@ -270,14 +369,23 @@ function OrderSummaryPanel({ product, sizes, canViewPricing, canManageWorkLogs }
 
       {canViewPricing && product.price_per_piece && (
         <>
-          <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             <div>
-              <p className="text-lg font-bold text-gray-100">₹{product.price_per_piece}</p>
-              <p className="text-xs text-gray-500">Price per piece</p>
+              <p className="text-2xl font-bold text-gray-100">
+                ₹{pricePerPiece.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+              <p className="text-xs text-gray-500">Price per piece (Base)</p>
             </div>
             <div>
-              <p className="text-lg font-bold text-gray-100">₹{totalValue?.toLocaleString('en-IN')}</p>
-              <p className="text-xs text-gray-500">Total Order Value ({totalQty} pcs)</p>
+              <p className="text-2xl font-bold text-brand-400">
+                ₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </p>
+              <p className="text-xs text-gray-400">Total Order Value ({totalQty} pcs)</p>
+              {gstRate > 0 && (
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Base: ₹{subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + GST ({gstRate}%): ₹{gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              )}
             </div>
           </div>
           <div className="flex gap-2">
