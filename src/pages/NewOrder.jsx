@@ -4,6 +4,33 @@ import { supabase, uploadPhoto } from '../supabaseClient.js'
 import { inputClass, labelClass } from '../components/Modal.jsx'
 import { WORK_TYPES } from '../workTypes.js'
 
+async function generateNextPoNumber(brandName) {
+  const prefix = brandName
+    ? brandName.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 4)
+    : 'PO'
+
+  const now = new Date()
+  const year = String(now.getFullYear()).slice(-2)
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const baseTag = `${prefix}-${year}${month}`
+
+  const { data } = await supabase
+    .from('products')
+    .select('po_number')
+    .ilike('po_number', `${baseTag}-%`)
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  let nextSeq = 1
+  if (data && data.length > 0 && data[0].po_number) {
+    const parts = data[0].po_number.split('-')
+    const lastNum = parseInt(parts[parts.length - 1], 10)
+    if (!isNaN(lastNum)) nextSeq = lastNum + 1
+  }
+
+  return `${baseTag}-${String(nextSeq).padStart(3, '0')}`
+}
+
 const createEmptyItem = () => ({
   pickedGarmentId: '',
   name: '',
@@ -21,12 +48,10 @@ export default function NewOrder() {
   const [brands, setBrands] = useState([])
   const [savedGarments, setSavedGarments] = useState([])
 
-  // Order-level fields
   const [brandId, setBrandId] = useState('')
   const [poNumber, setPoNumber] = useState('')
   const [gstRate, setGstRate] = useState(5)
 
-  // Multiple items
   const [items, setItems] = useState([createEmptyItem()])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -36,26 +61,44 @@ export default function NewOrder() {
     supabase.from('garments').select('*').order('name').then(({ data }) => setSavedGarments(data || []))
   }, [])
 
+  const handleBrandChange = async (newBrandId) => {
+    setBrandId(newBrandId)
+    setItems(prev => prev.map(it => ({ ...it, pickedGarmentId: '' })))
+
+    const brandObj = brands.find(b => b.id === newBrandId)
+    const nextPo = await generateNextPoNumber(brandObj?.name)
+    setPoNumber(nextPo)
+  }
+
   const updateItem = (index, field, value) => {
     setItems(prev => prev.map((item, idx) => (idx === index ? { ...item, [field]: value } : item)))
   }
 
   const pickGarment = (itemIndex, gId) => {
     const g = savedGarments.find(x => x.id === gId)
-    setItems(prev => prev.map((item, idx) => {
-      if (idx !== itemIndex) return item
-      if (!gId || !g) {
-        return { ...item, pickedGarmentId: '', name: '', styleCode: '', coverPhotoUrl: null, file: null }
-      }
-      return {
-        ...item,
-        pickedGarmentId: g.id,
-        name: g.name,
-        styleCode: g.style_code || '',
-        coverPhotoUrl: g.cover_photo_url || null,
-        file: null,
-      }
-    }))
+    setItems(prev =>
+      prev.map((item, idx) => {
+        if (idx !== itemIndex) return item
+        if (!gId || !g) {
+          return {
+            ...item,
+            pickedGarmentId: '',
+            name: '',
+            styleCode: '',
+            coverPhotoUrl: null,
+            file: null,
+          }
+        }
+        return {
+          ...item,
+          pickedGarmentId: g.id,
+          name: g.name,
+          styleCode: g.style_code || '',
+          coverPhotoUrl: g.cover_photo_url || null,
+          file: null,
+        }
+      })
+    )
   }
 
   const addLineItem = () => setItems([...items, createEmptyItem()])
@@ -64,39 +107,53 @@ export default function NewOrder() {
     setItems(items.filter((_, idx) => idx !== index))
   }
 
-  // Size Row Operations
   const updateSize = (itemIdx, sizeIdx, field, value) => {
-    setItems(prev => prev.map((item, idx) => {
-      if (idx !== itemIdx) return item
-      const newSizes = item.sizes.map((s, sIdx) => sIdx === sizeIdx ? { ...s, [field]: value } : s)
-      return { ...item, sizes: newSizes }
-    }))
+    setItems(prev =>
+      prev.map((item, idx) => {
+        if (idx !== itemIdx) return item
+        const newSizes = item.sizes.map((s, sIdx) =>
+          sIdx === sizeIdx ? { ...s, [field]: value } : s
+        )
+        return { ...item, sizes: newSizes }
+      })
+    )
   }
 
   const addSize = (itemIdx) => {
-    setItems(prev => prev.map((item, idx) => (
-      idx === itemIdx ? { ...item, sizes: [...item.sizes, { size_label: '', quantity: '' }] } : item
-    )))
+    setItems(prev =>
+      prev.map((item, idx) =>
+        idx === itemIdx
+          ? { ...item, sizes: [...item.sizes, { size_label: '', quantity: '' }] }
+          : item
+      )
+    )
   }
 
   const removeSize = (itemIdx, sizeIdx) => {
-    setItems(prev => prev.map((item, idx) => (
-      idx === itemIdx ? { ...item, sizes: item.sizes.filter((_, sIdx) => sIdx !== sizeIdx) } : item
-    )))
+    setItems(prev =>
+      prev.map((item, idx) =>
+        idx === itemIdx
+          ? { ...item, sizes: item.sizes.filter((_, sIdx) => sIdx !== sizeIdx) }
+          : item
+      )
+    )
   }
 
   const toggleWork = (itemIdx, key) => {
-    setItems(prev => prev.map((item, idx) => {
-      if (idx !== itemIdx) return item
-      const planned = item.plannedWork.includes(key)
-        ? item.plannedWork.filter(w => w !== key)
-        : [...item.plannedWork, key]
-      return { ...item, plannedWork: planned }
-    }))
+    setItems(prev =>
+      prev.map((item, idx) => {
+        if (idx !== itemIdx) return item
+        const planned = item.plannedWork.includes(key)
+          ? item.plannedWork.filter(w => w !== key)
+          : [...item.plannedWork, key]
+        return { ...item, plannedWork: planned }
+      })
+    )
   }
 
-  // Calculations
-  const visibleGarments = brandId ? savedGarments.filter(g => g.brand_id === brandId) : savedGarments
+  const visibleGarments = brandId
+    ? savedGarments.filter(g => g.brand_id === brandId)
+    : savedGarments
 
   let grandTotalQty = 0
   let combinedSubtotal = 0
@@ -119,9 +176,15 @@ export default function NewOrder() {
     e.preventDefault()
     for (let i = 0; i < items.length; i++) {
       const item = items[i]
-      if (!item.name.trim()) { setError(`Product #${i + 1} needs a name.`); return }
+      if (!item.name.trim()) {
+        setError(`Product #${i + 1} needs a name.`)
+        return
+      }
       const validSizes = item.sizes.filter(s => s.size_label.trim() && Number(s.quantity) > 0)
-      if (validSizes.length === 0) { setError(`Product #${i + 1} needs at least one size & quantity.`); return }
+      if (validSizes.length === 0) {
+        setError(`Product #${i + 1} needs at least one size & quantity.`)
+        return
+      }
     }
 
     setError('')
@@ -133,12 +196,16 @@ export default function NewOrder() {
 
         let garmentId = item.pickedGarmentId || null
         if (!garmentId && item.saveToCatalog) {
-          const { data: newG, error: gErr } = await supabase.from('garments').insert({
-            name: item.name.trim(),
-            style_code: item.styleCode.trim() || null,
-            brand_id: brandId || null,
-            cover_photo_url: finalPhoto,
-          }).select().single()
+          const { data: newG, error: gErr } = await supabase
+            .from('garments')
+            .insert({
+              name: item.name.trim(),
+              style_code: item.styleCode.trim() || null,
+              brand_id: brandId || null,
+              cover_photo_url: finalPhoto,
+            })
+            .select()
+            .single()
           if (gErr) throw gErr
           garmentId = newG.id
         }
@@ -147,22 +214,28 @@ export default function NewOrder() {
         const qty = validSizes.reduce((sum, s) => sum + Number(s.quantity), 0)
         const rate = item.pricePerPiece ? Number(item.pricePerPiece) : null
         const itemSubtotal = rate ? rate * qty : 0
-        const itemTotal = itemSubtotal ? Math.round(itemSubtotal + (itemSubtotal * Number(gstRate)) / 100) : null
+        const itemTotal = itemSubtotal
+          ? Math.round(itemSubtotal + (itemSubtotal * Number(gstRate)) / 100)
+          : null
 
-        const { data: prod, error: pErr } = await supabase.from('products').insert({
-          garment_id: garmentId,
-          po_number: poNumber.trim() || null,
-          name: item.name.trim(),
-          style_code: item.styleCode.trim() || null,
-          brand_id: brandId || null,
-          status: 'in_production',
-          stage: 'cutting',
-          price_per_piece: rate,
-          gst_rate: Number(gstRate),
-          total_amount: itemTotal,
-          planned_work: item.plannedWork,
-          cover_photo_url: finalPhoto,
-        }).select().single()
+        const { data: prod, error: pErr } = await supabase
+          .from('products')
+          .insert({
+            garment_id: garmentId,
+            po_number: poNumber.trim() || null,
+            name: item.name.trim(),
+            style_code: item.styleCode.trim() || null,
+            brand_id: brandId || null,
+            status: 'in_production',
+            stage: 'cutting',
+            price_per_piece: rate,
+            gst_rate: Number(gstRate),
+            total_amount: itemTotal,
+            planned_work: item.plannedWork,
+            cover_photo_url: finalPhoto,
+          })
+          .select()
+          .single()
         if (pErr) throw pErr
 
         const sizeRows = validSizes.map(s => ({
@@ -196,11 +269,7 @@ export default function NewOrder() {
               <label className={labelClass}>Brand</label>
               <select
                 value={brandId}
-                onChange={(e) => {
-                  setBrandId(e.target.value)
-                  // reset picks if brand changed
-                  setItems(items.map(it => ({ ...it, pickedGarmentId: '' })))
-                }}
+                onChange={(e) => handleBrandChange(e.target.value)}
                 className={inputClass}
               >
                 <option value="">No Brand / Independent</option>
@@ -208,12 +277,25 @@ export default function NewOrder() {
               </select>
             </div>
             <div>
-              <label className={labelClass}>PO / Batch Number</label>
+              <div className="flex justify-between items-center mb-1">
+                <label className={labelClass}>PO / Batch Number</label>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const brandObj = brands.find(b => b.id === brandId)
+                    const nextPo = await generateNextPoNumber(brandObj?.name)
+                    setPoNumber(nextPo)
+                  }}
+                  className="text-xs text-brand-400 hover:text-brand-300 font-medium"
+                >
+                  ↺ Auto-Generate
+                </button>
+              </div>
               <input
                 value={poNumber}
-                onChange={(e) => setPoNumber(e.target.value)}
-                placeholder="e.g. PO-892 or AUG-RUN-01"
-                className={inputClass}
+                onChange={(e) => setPoNumber(e.target.value.toUpperCase())}
+                placeholder="e.g. UNAR-2609-001"
+                className={`${inputClass} font-mono tracking-wider`}
               />
             </div>
           </div>
@@ -251,9 +333,8 @@ export default function NewOrder() {
                       </button>
                     )}
                   </div>
-              
+
                   <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2.5 max-h-60 overflow-y-auto p-1.5 bg-gray-950/40 rounded-xl border border-gray-800">
-                    {/* Option to create new/custom */}
                     <button
                       type="button"
                       onClick={() => pickGarment(idx, '')}
@@ -266,8 +347,7 @@ export default function NewOrder() {
                       <span className="text-2xl mb-1">✍️</span>
                       <span className="text-xs font-semibold leading-tight">Custom Garment</span>
                     </button>
-              
-                    {/* Catalog items with square product cards */}
+
                     {visibleGarments.map((g) => {
                       const isSelected = item.pickedGarmentId === g.id
                       return (
@@ -305,10 +385,10 @@ export default function NewOrder() {
                 </div>
               )}
 
-              {/* Preview */}
+              {/* Selected Photo Display */}
               {item.coverPhotoUrl && !item.file && (
-                <div className="w-20 aspect-square rounded-lg overflow-hidden border border-gray-800 mb-3 bg-gray-950">
-                  <img src={item.coverPhotoUrl} className="w-full h-full object-cover" />
+                <div className="w-24 aspect-square rounded-xl overflow-hidden border border-gray-800 mb-3 bg-gray-950 flex items-center justify-center">
+                  <img src={item.coverPhotoUrl} alt="Preview" className="w-full h-full object-cover" />
                 </div>
               )}
 
