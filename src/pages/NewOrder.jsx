@@ -236,35 +236,71 @@ export default function NewOrder() {
                 )}
               </div>
 
-              {/* Garment Selector */}
+              {/* Visual Garment Selector Grid */}
               {visibleGarments.length > 0 && (
                 <div className="mb-4">
-                  <label className="text-xs text-gray-400 mb-1.5 block">Pick from catalog</label>
-                  <div className="flex gap-2 overflow-x-auto pb-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs text-gray-400">Pick from catalog</label>
+                    {item.pickedGarmentId && (
+                      <button
+                        type="button"
+                        onClick={() => pickGarment(idx, '')}
+                        className="text-xs text-brand-400 hover:underline"
+                      >
+                        Clear Selection (Custom Garment)
+                      </button>
+                    )}
+                  </div>
+              
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2.5 max-h-60 overflow-y-auto p-1.5 bg-gray-950/40 rounded-xl border border-gray-800">
+                    {/* Option to create new/custom */}
                     <button
                       type="button"
                       onClick={() => pickGarment(idx, '')}
-                      className={`px-3 py-2 rounded-lg border text-xs whitespace-nowrap flex items-center gap-1.5 ${
-                        !item.pickedGarmentId ? 'border-brand-500 bg-brand-950/20 text-brand-300' : 'border-gray-800 bg-gray-800/40 text-gray-400'
+                      className={`p-3 rounded-lg border text-left flex flex-col items-center justify-center text-center transition ${
+                        !item.pickedGarmentId
+                          ? 'border-brand-500 bg-brand-950/20 text-brand-300'
+                          : 'border-gray-800 bg-gray-900/60 text-gray-400 hover:border-gray-700'
                       }`}
                     >
-                      ✍️ Custom / New
+                      <span className="text-2xl mb-1">✍️</span>
+                      <span className="text-xs font-semibold leading-tight">Custom Garment</span>
                     </button>
-                    {visibleGarments.map(g => (
-                      <button
-                        key={g.id}
-                        type="button"
-                        onClick={() => pickGarment(idx, g.id)}
-                        className={`px-2.5 py-1.5 rounded-lg border text-xs whitespace-nowrap flex items-center gap-2 ${
-                          item.pickedGarmentId === g.id ? 'border-brand-500 bg-brand-950/30 text-white' : 'border-gray-800 bg-gray-800/40 text-gray-300'
-                        }`}
-                      >
-                        {g.cover_photo_url ? (
-                          <img src={g.cover_photo_url} className="w-5 h-5 rounded object-cover" />
-                        ) : <span>👕</span>}
-                        <span>{g.name}</span>
-                      </button>
-                    ))}
+              
+                    {/* Catalog items with square product cards */}
+                    {visibleGarments.map((g) => {
+                      const isSelected = item.pickedGarmentId === g.id
+                      return (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => pickGarment(idx, isSelected ? '' : g.id)}
+                          className={`group rounded-lg border overflow-hidden text-left transition flex flex-col bg-gray-900 ${
+                            isSelected
+                              ? 'border-brand-500 ring-2 ring-brand-500/50'
+                              : 'border-gray-800 hover:border-gray-700'
+                          }`}
+                        >
+                          <div className="aspect-square w-full bg-gray-800 flex items-center justify-center overflow-hidden">
+                            {g.cover_photo_url ? (
+                              <img
+                                src={g.cover_photo_url}
+                                alt={g.name}
+                                className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
+                              />
+                            ) : (
+                              <span className="text-2xl text-gray-600">👕</span>
+                            )}
+                          </div>
+                          <div className="p-2 w-full">
+                            <p className="text-xs font-medium text-gray-100 truncate">{g.name}</p>
+                            {g.style_code && (
+                              <p className="text-[10px] text-gray-400 truncate">{g.style_code}</p>
+                            )}
+                          </div>
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
               )}
