@@ -70,11 +70,10 @@ export default function NewOrder() {
 
   const validSizes = sizes.filter(s => s.size_label.trim() && Number(s.quantity) > 0)
   const totalQty = validSizes.reduce((sum, s) => sum + Number(s.quantity), 0)
-  const subtotal = pricePerPiece ? Number(pricePerPiece) * totalQty : null
-  const gstAmount = subtotal ? (subtotal * Number(gstRate)) / 100 : 0
   const hasPricing = Boolean(pricePerPiece && !isNaN(Number(pricePerPiece)) && totalQty > 0)
   const subtotal = hasPricing ? Number(pricePerPiece) * totalQty : 0
   const gstAmount = hasPricing ? (subtotal * Number(gstRate)) / 100 : 0
+  
 
   // Round to the nearest ₹1
   const finalTotal = hasPricing ? Math.round(subtotal + gstAmount) : 0
