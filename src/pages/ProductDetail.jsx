@@ -66,7 +66,7 @@ export default function ProductDetail() {
 
   return (
     <div>
-      <Link to="/garments" className="text-brand-500 text-sm font-medium">← Back to Garments</Link>
+      <Link to="/" className="text-brand-500 text-sm font-medium">← Back to Orders</Link>
 
       <div className="flex gap-4 mt-3 mb-3 items-start">
         <div className="w-24 h-24 rounded-xl bg-gray-800 overflow-hidden flex-shrink-0">
@@ -136,7 +136,7 @@ export default function ProductDetail() {
           brands={brands}
           onClose={() => setEditingProduct(false)}
           onSaved={() => { setEditingProduct(false); load() }}
-          onDeleted={() => navigate('/garments')}
+          onDeleted={() => navigate('/')}
         />
       )}
     </div>
