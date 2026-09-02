@@ -7,15 +7,8 @@ import { exportProductPDF } from '../pdfExport.js'
 import ProductQR from '../components/ProductQR.jsx'
 import { useAuth } from '../components/PinGate.jsx'
 import { can } from '../permissions.js'
-
-const WORK_TYPE_LABEL = {
-  screen_printing: 'Screen Printing',
-  embroidery: 'Embroidery',
-  sampling: 'Sampling',
-  sample_change: 'Sample Change',
-  stitching: 'Stitching',
-  other: 'Other',
-}
+import { WORK_TYPES, WORK_TYPE_LABEL } from '../workTypes.js'
+import { buildOrderSummaryText, buildWhatsAppUrl } from '../orderSummary.js'
 
 export default function ProductDetail() {
   const { id } = useParams()
@@ -28,6 +21,7 @@ export default function ProductDetail() {
   const canManageSamples = can(user, 'manage_samples')
   const canChangeStage = can(user, 'change_stage')
   const canExport = can(user, 'export_pdf')
+  const canViewPricing = can(user, 'view_pricing')
   const [product, setProduct] = useState(null)
   const [brands, setBrands] = useState([])
   const [sizes, setSizes] = useState([])
@@ -112,6 +106,10 @@ export default function ProductDetail() {
       </div>
 
       {canManageWorkLogs && <ProductQR productId={product.id} />}
+
+      {(product.planned_work?.length > 0 || (canViewPricing && product.price_per_piece)) && (
+        <OrderSummaryPanel product={product} sizes={sizes} canViewPricing={canViewPricing} canManageWorkLogs={canManageWorkLogs} />
+      )}
 
       <div className="flex gap-1 border-b border-gray-800 mb-4 overflow-x-auto">
         {[
@@ -211,6 +209,64 @@ function ProductForm({ product, brands, onClose, onSaved, onDeleted }) {
         <FormActions onCancel={onClose} saving={saving} onDelete={remove} />
       </form>
     </Modal>
+  )
+}
+
+function OrderSummaryPanel({ product, sizes, canViewPricing, canManageWorkLogs }) {
+  const totalQty = sizes.reduce((sum, s) => sum + (s.quantity || 0), 0)
+  const totalValue = product.price_per_piece ? product.price_per_piece * totalQty : null
+
+  const share = () => {
+    const text = buildOrderSummaryText({ product, brandName: product.brands?.name, sizes })
+    window.open(buildWhatsAppUrl(text, product.brands?.contact_phone), '_blank')
+  }
+  const copy = async () => {
+    const text = buildOrderSummaryText({ product, brandName: product.brands?.name, sizes })
+    try {
+      await navigator.clipboard.writeText(text)
+      alert('Summary copied to clipboard.')
+    } catch {
+      alert('Could not copy — your browser may not allow clipboard access here.')
+    }
+  }
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
+      <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Order Summary</p>
+
+      {canManageWorkLogs && product.planned_work?.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {product.planned_work.map(w => (
+            <span key={w} className="text-[11px] px-2 py-0.5 rounded-full bg-gray-800 text-gray-300">
+              {WORK_TYPE_LABEL[w] || w}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {canViewPricing && product.price_per_piece && (
+        <>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <p className="text-lg font-bold text-gray-100">₹{product.price_per_piece}</p>
+              <p className="text-xs text-gray-500">Price per piece</p>
+            </div>
+            <div>
+              <p className="text-lg font-bold text-gray-100">₹{totalValue?.toLocaleString('en-IN')}</p>
+              <p className="text-xs text-gray-500">Total Order Value ({totalQty} pcs)</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={share} className="flex-1 bg-green-800 hover:bg-green-700 text-white rounded-lg py-2 text-sm font-medium">
+              💬 Share via WhatsApp
+            </button>
+            <button onClick={copy} className="flex-1 bg-gray-800 border border-gray-700 hover:border-gray-600 text-gray-200 rounded-lg py-2 text-sm font-medium">
+              Copy Summary
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
