@@ -49,6 +49,11 @@ export function PinGate({ children }) {
   return userData
 }
 
+  const logout = () => {
+    setUser(null)
+    localStorage.removeItem('np_user')
+  }
+
   return (
     <AuthContext.Provider value={{ user, loginWithPin, logout }}>
       {user ? children : <PinLoginScreen onLogin={loginWithPin} />}
