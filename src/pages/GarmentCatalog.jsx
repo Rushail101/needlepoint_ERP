@@ -25,6 +25,16 @@ export default function GarmentCatalog() {
   }
   useEffect(() => { load() }, [])
 
+  const filtered = orders
+    .filter(p => (filterBrand ? p.brand_id === filterBrand : true))
+    .filter(p => {
+      if (!search.trim()) return true
+      const q = search.trim().toLowerCase()
+      return p.name?.toLowerCase().includes(q) ||
+        p.style_code?.toLowerCase().includes(q) ||
+        p.brands?.name?.toLowerCase().includes(q)
+    })
+
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
