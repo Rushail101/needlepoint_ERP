@@ -20,6 +20,7 @@ export default function NewOrder() {
   const [sizes, setSizes] = useState([{ size_label: '', quantity: '' }])
   const [plannedWork, setPlannedWork] = useState([])
   const [pricePerPiece, setPricePerPiece] = useState('')
+  const [gstRate, setGstRate] = useState(5)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -30,7 +31,6 @@ export default function NewOrder() {
 
   const handleBrandChange = (newBrandId) => {
     setBrandId(newBrandId)
-    // Clear selected garment if it belongs to a different brand
     if (pickedGarmentId) {
       const current = savedGarments.find(g => g.id === pickedGarmentId)
       if (current && newBrandId && current.brand_id !== newBrandId) {
@@ -59,20 +59,21 @@ export default function NewOrder() {
   }
 
   const updateSize = (i, field, value) => {
-    setSizes(sizes.map((s, idx) => idx === i ? { ...s, [field]: value } : s))
+    setSizes(sizes.map((s, idx) => (idx === i ? { ...s, [field]: value } : s)))
   }
   const addSizeRow = () => setSizes([...sizes, { size_label: '', quantity: '' }])
   const removeSizeRow = (i) => setSizes(sizes.filter((_, idx) => idx !== i))
 
   const toggleWork = (key) => {
-    setPlannedWork(prev => prev.includes(key) ? prev.filter(w => w !== key) : [...prev, key])
+    setPlannedWork(prev => (prev.includes(key) ? prev.filter(w => w !== key) : [...prev, key]))
   }
 
   const validSizes = sizes.filter(s => s.size_label.trim() && Number(s.quantity) > 0)
   const totalQty = validSizes.reduce((sum, s) => sum + Number(s.quantity), 0)
-  const totalValue = pricePerPiece ? Number(pricePerPiece) * totalQty : null
+  const subtotal = pricePerPiece ? Number(pricePerPiece) * totalQty : null
+  const gstAmount = subtotal ? (subtotal * Number(gstRate)) / 100 : 0
+  const finalTotal = subtotal ? subtotal + gstAmount : null
 
-  // Garments filtered by active brand selection
   const visibleGarments = brandId
     ? savedGarments.filter(g => g.brand_id === brandId)
     : savedGarments
@@ -108,6 +109,8 @@ export default function NewOrder() {
         status: 'in_production',
         stage: 'cutting',
         price_per_piece: pricePerPiece ? Number(pricePerPiece) : null,
+        gst_rate: Number(gstRate),
+        total_amount: finalTotal,
         planned_work: plannedWork,
         cover_photo_url: finalPhotoUrl,
       }).select().single()
@@ -135,7 +138,7 @@ export default function NewOrder() {
       <h2 className="text-xl font-bold text-gray-100 mt-3 mb-4">New Order</h2>
 
       <form onSubmit={submit}>
-        {/* 1. Brand Selection */}
+        {/* Brand Selector */}
         <label className={labelClass}>Brand</label>
         <select
           value={brandId}
@@ -146,7 +149,7 @@ export default function NewOrder() {
           {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
 
-        {/* 2. Visual Garment Card Selector */}
+        {/* Visual Garment Selector */}
         <div className="mb-5">
           <div className="flex items-center justify-between mb-2">
             <label className={labelClass}>Select Existing Garment</label>
@@ -162,7 +165,6 @@ export default function NewOrder() {
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 max-h-64 overflow-y-auto p-1 bg-gray-950/40 rounded-xl border border-gray-800">
-            {/* Custom Entry Card */}
             <button
               type="button"
               onClick={() => pickGarment('')}
@@ -216,7 +218,7 @@ export default function NewOrder() {
           )}
         </div>
 
-        {/* 3. Selected or Uploaded Photo Preview (Natural Aspect Ratio) */}
+        {/* Selected Photo Display */}
         {coverPhotoUrl && !file && (
           <div className="mb-4">
             <label className={labelClass}>Garment Image</label>
@@ -226,7 +228,6 @@ export default function NewOrder() {
           </div>
         )}
 
-        {/* 4. Garment Details */}
         <label className={labelClass}>Garment name*</label>
         <input
           value={name}
@@ -266,7 +267,7 @@ export default function NewOrder() {
           </>
         )}
 
-        {/* 5. Sizes & Quantities */}
+        {/* Sizes */}
         <label className={labelClass}>Sizes & Quantities*</label>
         <div className="space-y-2 mb-2">
           {sizes.map((s, i) => (
@@ -292,7 +293,7 @@ export default function NewOrder() {
         </div>
         <button type="button" onClick={addSizeRow} className="text-brand-500 text-sm font-medium mb-4">+ Add another size</button>
 
-        {/* 6. Work Required */}
+        {/* Work Required */}
         <label className={labelClass}>Work required</label>
         <div className="grid grid-cols-3 gap-2 mb-4">
           {WORK_TYPES.map(w => (
@@ -312,21 +313,71 @@ export default function NewOrder() {
           ))}
         </div>
 
-        {/* 7. Pricing */}
-        <label className={labelClass}>Price per piece (₹)</label>
-        <input
-          value={pricePerPiece}
-          onChange={(e) => setPricePerPiece(e.target.value.replace(/[^0-9.]/g, ''))}
-          inputMode="decimal"
-          className={inputClass}
-          placeholder="optional — used for the order summary"
-        />
+        {/* Pricing & GST */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className={labelClass}>Price per piece (₹)</label>
+            <input
+              value={pricePerPiece}
+              onChange={(e) => setPricePerPiece(e.target.value.replace(/[^0-9.]/g, ''))}
+              inputMode="decimal"
+              className={inputClass}
+              placeholder="Base rate before GST"
+            />
+          </div>
 
-        {(totalQty > 0 || totalValue) && (
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
-            <p className="text-sm text-gray-300">Total Qty: <span className="font-semibold text-gray-100">{totalQty} pcs</span></p>
-            {totalValue != null && (
-              <p className="text-sm text-gray-300 mt-1">Total Order Value: <span className="font-semibold text-gray-100">₹{totalValue.toLocaleString('en-IN')}</span></p>
+          <div>
+            <label className={labelClass}>GST Slab</label>
+            <div className="flex gap-2">
+              {[
+                { label: '0%', value: 0 },
+                { label: '5%', value: 5 },
+                { label: '18%', value: 18 },
+              ].map(slab => (
+                <button
+                  key={slab.value}
+                  type="button"
+                  onClick={() => setGstRate(slab.value)}
+                  className={`flex-1 py-2 rounded-lg text-sm font-semibold border transition ${
+                    gstRate === slab.value
+                      ? 'bg-brand-600 border-brand-600 text-white'
+                      : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600'
+                  }`}
+                >
+                  {slab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Order Breakdown */}
+        {(totalQty > 0 || subtotal != null) && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4 space-y-2 text-sm">
+            <div className="flex justify-between text-gray-300">
+              <span>Total Quantity:</span>
+              <span className="font-semibold text-gray-100">{totalQty} pcs</span>
+            </div>
+
+            {subtotal != null && (
+              <>
+                <div className="flex justify-between text-gray-300">
+                  <span>Subtotal (Taxable):</span>
+                  <span>₹{subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+
+                <div className="flex justify-between text-gray-400 text-xs">
+                  <span>GST ({gstRate}%):</span>
+                  <span>₹{gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+
+                <div className="border-t border-gray-800 pt-2 mt-2 flex justify-between text-base font-bold text-gray-100">
+                  <span>Grand Total:</span>
+                  <span className="text-brand-400">
+                    ₹{finalTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </>
             )}
           </div>
         )}
