@@ -5,7 +5,7 @@
 
 const RULES = {
   admin: [
-    'view_dashboard', 'view_brands', 'view_team', 'view_access',
+    'view_dashboard', 'view_brands', 'view_team', 'view_access', 'view_pricing',
     'edit_garments', 'delete_garments', 'manage_sizes', 'manage_photos',
     'manage_brands', 'manage_team', 'manage_work_logs', 'manage_samples',
     'change_stage', 'manage_access', 'export_pdf',
