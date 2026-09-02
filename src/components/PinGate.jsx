@@ -10,34 +10,44 @@ export function PinGate({ children }) {
   })
 
   const loginWithPin = async (pinInput) => {
-    const cleanPin = String(pinInput).trim()
-    const { data, error } = await supabase
-      .from('access_pins')
-      .select('*, employees(*)')
-      .eq('pin', cleanPin)
-      .eq('active', true)
-      .single()
+  const cleanPin = String(pinInput).trim()
+  const masterPin = String(import.meta.env.VITE_APP_PIN || '').trim()
 
-    if (error || !data) {
-      throw new Error('Invalid or inactive PIN')
+  // 1. Check Master / Environment Admin PIN first
+  if (masterPin && cleanPin === masterPin) {
+    const adminUser = {
+      id: 'master-admin',
+      name: 'Admin',
+      role: 'admin',
     }
-
-    const userData = {
-      id: data.id,
-      name: data.name,
-      role: data.role.toLowerCase(),
-      employeeId: data.employee_id,
-    }
-
-    setUser(userData)
-    localStorage.setItem('np_user', JSON.stringify(userData))
-    return userData
+    setUser(adminUser)
+    localStorage.setItem('np_user', JSON.stringify(adminUser))
+    return adminUser
   }
 
-  const logout = () => {
-    setUser(null)
-    localStorage.removeItem('np_user')
+  // 2. Fall back to Supabase access_pins table (for floor managers / staff)
+  const { data, error } = await supabase
+    .from('access_pins')
+    .select('*, employees(*)')
+    .eq('pin', cleanPin)
+    .eq('active', true)
+    .single()
+
+  if (error || !data) {
+    throw new Error('Invalid PIN')
   }
+
+  const userData = {
+    id: data.id,
+    name: data.name,
+    role: data.role.toLowerCase(),
+    employeeId: data.employee_id,
+  }
+
+  setUser(userData)
+  localStorage.setItem('np_user', JSON.stringify(userData))
+  return userData
+}
 
   return (
     <AuthContext.Provider value={{ user, loginWithPin, logout }}>
