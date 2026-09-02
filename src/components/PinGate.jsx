@@ -144,3 +144,10 @@ function PinLoginScreen({ onLogin }) {
     </div>
   )
 }
+
+// Alias AuthProvider as PinGate for backwards compatibility with App.jsx
+export function PinGate({ children }) {
+  return <AuthProvider>{children}</AuthProvider>
+}
+
+export default PinGate
