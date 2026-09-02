@@ -9,6 +9,7 @@ import Employees from './pages/Employees.jsx'
 import EmployeeSummary from './pages/EmployeeSummary.jsx'
 import WorkLog from './pages/WorkLog.jsx'
 import Access from './pages/Access.jsx'
+import NewOrder from './pages/NewOrder.jsx'
 
 const navItems = [
   { to: '/', label: 'Home', icon: '🏠', need: 'view_dashboard' },
@@ -67,6 +68,7 @@ function Shell() {
         <Routes>
           <Route path="/" element={<Guard need="view_dashboard"><Dashboard /></Guard>} />
           <Route path="/garments" element={<Products />} />
+          <Route path="/orders/new" element={<Guard need="edit_garments"><NewOrder /></Guard>} />
           <Route path="/products/:id" element={<ProductDetail />} />
           <Route path="/brands" element={<Guard need="view_brands"><Brands /></Guard>} />
           <Route path="/employees" element={<Guard need="view_team"><Employees /></Guard>} />
