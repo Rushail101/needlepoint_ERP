@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate, NavLink } from 'react-router-dom'
-import PinGate, { useAuth } from './components/PinGate.jsx'
+import { AuthProvider, useAuth } from './components/PinGate.jsx'
 import { can } from './permissions.js'
 import Orders from './pages/Orders.jsx'
 import ProductDetail from './pages/ProductDetail.jsx'
