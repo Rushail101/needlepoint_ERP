@@ -61,6 +61,10 @@ function showPrintModal({ title, subtitle, icon, html, fileName }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Single Product Job Card / Production Sheet
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. Single Product Job Card / Production Sheet
+// ─────────────────────────────────────────────────────────────────────────────
 export async function exportProductPDF({ product, sizes }) {
   const brandName = product.brands?.name || 'Independent';
   const totalQty = (sizes || []).reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
@@ -72,6 +76,10 @@ export async function exportProductPDF({ product, sizes }) {
 
   const docId = product.po_number || `JOB-${product.id.slice(0, 8).toUpperCase()}`;
   const fileName = `JOB_${sanitizeForFilename(docId)}_${sanitizeForFilename(product.name)}`;
+
+  // Target URL that workers or floor managers scan to log work or view stages
+  const logUrl = `${window.location.origin}/products/${product.id}`;
+  const qrCodeImg = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(logUrl)}`;
 
   const sizeRows = (sizes || []).map((s, i) => `
     <tr>
@@ -98,14 +106,24 @@ body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:#111;bac
 .mc:last-child{border-right:none}
 .mc .lbl{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
 .mc .val{font-size:11px;font-weight:700;color:#0f172a}
-.garment-box{display:flex;gap:16px;border:1px solid #cbd5e1;padding:12px;border-radius:6px;margin-bottom:14px;background:#fff}
-.garment-img{width:110px;height:110px;object-cover:cover;border-radius:6px;border:1px solid #e2e8f0;background:#f1f5f9;flex-shrink:0}
-.garment-info{flex:1}
+
+/* Garment card with uncompromised image ratio & QR block */
+.garment-box{display:flex;align-items:center;gap:18px;border:1px solid #cbd5e1;padding:12px 14px;border-radius:6px;margin-bottom:14px;background:#fff}
+.img-container{width:110px;height:120px;border-radius:6px;overflow:hidden;border:1px solid #e2e8f0;background:#f8fafc;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.garment-img{max-width:100%;max-height:100%;object-fit:contain}
+.garment-info{flex:1;min-width:0}
 .garment-info h2{font-size:16px;font-weight:800;color:#0f172a;margin-bottom:4px}
 .garment-info p{font-size:10.5px;color:#475569;line-height:1.5}
 .chips{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
-.chip{padding:2px 8px;border-radius:4px;font-size:9.5px;font-weight:700;background:#f1f5f9;color:#334155;border:1px solid #cbd5e1}
+.chip{padding:2.5px 8px;border-radius:4px;font-size:9.5px;font-weight:700;background:#f1f5f9;color:#334155;border:1px solid #cbd5e1}
 .chip-orange{background:#fff7ed;color:#c2410c;border-color:#fdba74}
+
+/* QR Code Section */
+.qr-box{text-align:center;padding-left:14px;border-left:1px dashed #cbd5e1;flex-shrink:0}
+.qr-box img{width:75px;height:75px;display:block;margin:0 auto 4px auto}
+.qr-lbl{font-size:8.5px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:0.04em}
+.qr-sub{font-size:8px;color:#64748b}
+
 table{width:100%;border-collapse:collapse;margin-bottom:14px;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden}
 thead th{background:#0f172a;color:#fff;padding:8px 10px;text-align:left;font-size:10px;letter-spacing:.04em;text-transform:uppercase}
 tbody td{padding:6px 10px;border-bottom:1px solid #e2e8f0;font-size:10.5px}
@@ -141,7 +159,12 @@ tbody tr:nth-child(even){background:#f8fafc}
 </div>
 
 <div class="garment-box">
-  ${product.cover_photo_url ? `<img src="${product.cover_photo_url}" class="garment-img" />` : ''}
+  ${product.cover_photo_url ? `
+    <div class="img-container">
+      <img src="${product.cover_photo_url}" class="garment-img" />
+    </div>
+  ` : ''}
+
   <div class="garment-info">
     <h2>${product.name}</h2>
     <p>Style Code: <strong>${product.style_code || 'N/A'}</strong></p>
@@ -150,6 +173,12 @@ tbody tr:nth-child(even){background:#f8fafc}
       <span class="chip chip-orange">${totalQty} Total Pieces</span>
       ${product.planned_work && product.planned_work.length > 0 ? product.planned_work.map(w => `<span class="chip">${w}</span>`).join('') : ''}
     </div>
+  </div>
+
+  <div class="qr-box">
+    <img src="${qrCodeImg}" alt="Log QR" />
+    <div class="qr-lbl">Scan to Log</div>
+    <div class="qr-sub">Update Stage / Work</div>
   </div>
 </div>
 
@@ -170,7 +199,7 @@ ${rate > 0 ? `
 <div class="totals-wrap">
   <div class="notes-col">
     <h4>Production Notes & Terms</h4>
-    <p>Per-piece production job card. Work logs are tracked by bundle barcodes and confirmed per stage.</p>
+    <p>Per-piece production job card. Floor supervisors and tailors can scan the QR code above to record finished pieces or update stages.</p>
   </div>
   <div class="amounts-col">
     <table>
