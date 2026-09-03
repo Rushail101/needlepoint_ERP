@@ -65,27 +65,24 @@ function showPrintModal({ title, subtitle, icon, html, fileName }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Single Product Job Card / Production Sheet
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. Single Product Floor Job Sheet (2x Scale, Zero Financials)
+// ─────────────────────────────────────────────────────────────────────────────
 export async function exportProductPDF({ product, sizes }) {
   const brandName = product.brands?.name || 'Independent';
   const totalQty = (sizes || []).reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
-  const rate = Number(product.price_per_piece || 0);
-  const subtotal = rate * totalQty;
-  const gstRate = Number(product.gst_rate ?? 5);
-  const gstAmount = subtotal > 0 ? (subtotal * gstRate) / 100 : 0;
-  const grandTotal = product.total_amount != null ? Number(product.total_amount) : Math.round(subtotal + gstAmount);
-
   const docId = product.po_number || `JOB-${product.id.slice(0, 8).toUpperCase()}`;
   const fileName = `JOB_${sanitizeForFilename(docId)}_${sanitizeForFilename(product.name)}`;
 
-  // Target URL that workers or floor managers scan to log work or view stages
+  // Mobile logging URL & higher resolution 2x QR code
   const logUrl = `${window.location.origin}/products/${product.id}`;
-  const qrCodeImg = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(logUrl)}`;
+  const qrCodeImg = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(logUrl)}`;
 
   const sizeRows = (sizes || []).map((s, i) => `
     <tr>
       <td style="text-align:center">${i + 1}</td>
-      <td style="font-weight:600">${s.size_label}</td>
-      <td style="text-align:right;font-weight:700">${s.quantity} pcs</td>
+      <td style="font-weight:700">${s.size_label}</td>
+      <td style="text-align:right;font-weight:900;color:#0f172a">${s.quantity} pcs</td>
     </tr>
   `).join('');
 
@@ -93,51 +90,58 @@ export async function exportProductPDF({ product, sizes }) {
 <title>${fileName}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:#111;background:#fff;padding:24px}
-.page{max-width:800px;margin:0 auto}
-.header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:2.5px solid #ea580c;margin-bottom:14px}
-.biz-name{font-size:24px;font-weight:900;letter-spacing:-.5px;color:#0f172a}
-.biz-sub{font-size:10px;text-transform:uppercase;color:#ea580c;font-weight:700;letter-spacing:1px}
-.doc-right{text-align:right}
-.doc-right h1{font-size:22px;font-weight:800;color:#0f172a;letter-spacing:0.5px}
-.doc-right .meta-val{font-size:12px;font-weight:700;color:#475569;margin-top:2px}
-.meta-grid{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid #cbd5e1;background:#f8fafc;margin-bottom:14px;border-radius:6px;overflow:hidden}
-.mc{padding:8px 10px;border-right:1px solid #cbd5e1}
-.mc:last-child{border-right:none}
-.mc .lbl{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
-.mc .val{font-size:11px;font-weight:700;color:#0f172a}
+body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:20px;color:#111;background:#fff;padding:32px}
+.page{max-width:980px;margin:0 auto}
 
-/* Garment card with uncompromised image ratio & QR block */
-.garment-box{display:flex;align-items:center;gap:18px;border:1px solid #cbd5e1;padding:12px 14px;border-radius:6px;margin-bottom:14px;background:#fff}
-.img-container{width:110px;height:120px;border-radius:6px;overflow:hidden;border:1px solid #e2e8f0;background:#f8fafc;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+/* Header */
+.header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:18px;border-bottom:5px solid #ea580c;margin-bottom:24px}
+.biz-name{font-size:42px;font-weight:900;letter-spacing:-1px;color:#0f172a;line-height:1}
+.biz-sub{font-size:18px;text-transform:uppercase;color:#ea580c;font-weight:800;letter-spacing:1.5px;margin-top:6px}
+.doc-right{text-align:right}
+.doc-right h1{font-size:36px;font-weight:900;color:#0f172a;letter-spacing:0.5px;line-height:1.1}
+.doc-right .meta-val{font-size:24px;font-weight:800;color:#ea580c;margin-top:6px;font-family:monospace}
+
+/* Meta Grid */
+.meta-grid{display:grid;grid-template-columns:repeat(4,1fr);border:2px solid #cbd5e1;background:#f8fafc;margin-bottom:24px;border-radius:12px;overflow:hidden}
+.mc{padding:14px 18px;border-right:2px solid #cbd5e1}
+.mc:last-child{border-right:none}
+.mc .lbl{font-size:15px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;font-weight:700}
+.mc .val{font-size:22px;font-weight:900;color:#0f172a}
+
+/* Garment & 2X Photo & 2X QR */
+.garment-box{display:flex;align-items:center;gap:28px;border:2px solid #cbd5e1;padding:24px;border-radius:12px;margin-bottom:24px;background:#fff}
+.img-container{width:220px;height:240px;border-radius:12px;overflow:hidden;border:2px solid #cbd5e1;background:#f8fafc;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .garment-img{max-width:100%;max-height:100%;object-fit:contain}
 .garment-info{flex:1;min-width:0}
-.garment-info h2{font-size:16px;font-weight:800;color:#0f172a;margin-bottom:4px}
-.garment-info p{font-size:10.5px;color:#475569;line-height:1.5}
-.chips{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
-.chip{padding:2.5px 8px;border-radius:4px;font-size:9.5px;font-weight:700;background:#f1f5f9;color:#334155;border:1px solid #cbd5e1}
+.garment-info h2{font-size:32px;font-weight:900;color:#0f172a;margin-bottom:8px;line-height:1.2}
+.garment-info p{font-size:20px;color:#334155;line-height:1.6}
+.chips{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+.chip{padding:6px 14px;border-radius:8px;font-size:16px;font-weight:800;background:#f1f5f9;color:#334155;border:2px solid #cbd5e1}
 .chip-orange{background:#fff7ed;color:#c2410c;border-color:#fdba74}
 
-/* QR Code Section */
-.qr-box{text-align:center;padding-left:14px;border-left:1px dashed #cbd5e1;flex-shrink:0}
-.qr-box img{width:75px;height:75px;display:block;margin:0 auto 4px auto}
-.qr-lbl{font-size:8.5px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:0.04em}
-.qr-sub{font-size:8px;color:#64748b}
+/* QR Code Section (2x) */
+.qr-box{text-align:center;padding-left:24px;border-left:2px dashed #cbd5e1;flex-shrink:0}
+.qr-box img{width:160px;height:160px;display:block;margin:0 auto 8px auto;border-radius:6px}
+.qr-lbl{font-size:15px;font-weight:900;color:#0f172a;text-transform:uppercase;letter-spacing:0.05em}
+.qr-sub{font-size:13px;color:#64748b;font-weight:600}
 
-table{width:100%;border-collapse:collapse;margin-bottom:14px;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden}
-thead th{background:#0f172a;color:#fff;padding:8px 10px;text-align:left;font-size:10px;letter-spacing:.04em;text-transform:uppercase}
-tbody td{padding:6px 10px;border-bottom:1px solid #e2e8f0;font-size:10.5px}
+/* Sizes Table */
+table{width:100%;border-collapse:collapse;margin-bottom:24px;border:2px solid #cbd5e1;border-radius:12px;overflow:hidden}
+thead th{background:#0f172a;color:#fff;padding:14px 18px;text-align:left;font-size:18px;letter-spacing:.05em;text-transform:uppercase}
+tbody td{padding:14px 18px;border-bottom:2px solid #e2e8f0;font-size:20px}
 tbody tr:nth-child(even){background:#f8fafc}
-.totals-wrap{display:flex;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden;margin-bottom:14px}
-.notes-col{flex:1;padding:10px 12px;background:#f8fafc;border-right:1px solid #cbd5e1}
-.notes-col h4{font-size:9.5px;text-transform:uppercase;color:#64748b;margin-bottom:6px}
-.notes-col p{font-size:10px;color:#334155;line-height:1.6}
-.amounts-col{min-width:240px;background:#fff}
-.amounts-col table{border:none;margin:0}
-.amounts-col td{padding:5px 12px;border-bottom:1px solid #f1f5f9}
-.amounts-col .r{text-align:right}
-.amounts-col .grand-row td{font-weight:800;font-size:13px;background:#0f172a;color:#fff;border-bottom:none}
-@media print{body{padding:0}.page{max-width:100%}}
+tfoot td{padding:16px 18px;font-size:22px;font-weight:900;background:#f1f5f9;border-top:3px solid #0f172a}
+
+/* Floor Instructions */
+.floor-note{border:2px solid #cbd5e1;background:#f8fafc;border-radius:12px;padding:16px 20px}
+.floor-note h4{font-size:16px;text-transform:uppercase;color:#64748b;font-weight:800;margin-bottom:6px}
+.floor-note p{font-size:17px;color:#334155;line-height:1.5}
+
+@media print{
+  body{padding:0}
+  .page{max-width:100%}
+  @page { margin: 12mm; }
+}
 </style></head><body><div class="page">
 
 <div class="header">
@@ -146,16 +150,16 @@ tbody tr:nth-child(even){background:#f8fafc}
     <div class="biz-sub">Apparel Manufacturing & Operations</div>
   </div>
   <div class="doc-right">
-    <h1>PRODUCTION JOB SHEET</h1>
+    <h1>FLOOR JOB SHEET</h1>
     <div class="meta-val">${docId}</div>
   </div>
 </div>
 
 <div class="meta-grid">
-  <div class="mc"><div class="lbl">Client / Brand</div><div class="val">${brandName}</div></div>
-  <div class="mc"><div class="lbl">Date Generated</div><div class="val">${fd(new Date())}</div></div>
+  <div class="mc"><div class="lbl">Brand</div><div class="val">${brandName}</div></div>
+  <div class="mc"><div class="lbl">Date</div><div class="val">${fd(new Date())}</div></div>
   <div class="mc"><div class="lbl">Current Stage</div><div class="val">${(product.stage || 'CUTTING').toUpperCase()}</div></div>
-  <div class="mc"><div class="lbl">Total Volume</div><div class="val">${totalQty} pcs</div></div>
+  <div class="mc"><div class="lbl">Total Quantity</div><div class="val" style="color:#ea580c">${totalQty} pcs</div></div>
 </div>
 
 <div class="garment-box">
@@ -168,7 +172,7 @@ tbody tr:nth-child(even){background:#f8fafc}
   <div class="garment-info">
     <h2>${product.name}</h2>
     <p>Style Code: <strong>${product.style_code || 'N/A'}</strong></p>
-    <p>Target Status: <strong>${(product.status || 'In Production').toUpperCase()}</strong></p>
+    <p>Status: <strong>${(product.status || 'In Production').toUpperCase()}</strong></p>
     <div class="chips">
       <span class="chip chip-orange">${totalQty} Total Pieces</span>
       ${product.planned_work && product.planned_work.length > 0 ? product.planned_work.map(w => `<span class="chip">${w}</span>`).join('') : ''}
@@ -178,14 +182,14 @@ tbody tr:nth-child(even){background:#f8fafc}
   <div class="qr-box">
     <img src="${qrCodeImg}" alt="Log QR" />
     <div class="qr-lbl">Scan to Log</div>
-    <div class="qr-sub">Update Stage / Work</div>
+    <div class="qr-sub">Update Stage & Tailor Work</div>
   </div>
 </div>
 
 <table>
   <thead>
     <tr>
-      <th style="width:40px;text-align:center">#</th>
+      <th style="width:60px;text-align:center">#</th>
       <th>Size Label</th>
       <th style="text-align:right">Planned Quantity</th>
     </tr>
@@ -193,31 +197,25 @@ tbody tr:nth-child(even){background:#f8fafc}
   <tbody>
     ${sizeRows || '<tr><td colspan="3" style="text-align:center;color:#64748b">No sizes assigned</td></tr>'}
   </tbody>
+  <tfoot>
+    <tr>
+      <td colspan="2">TOTAL RUN VOLUME</td>
+      <td style="text-align:right;color:#ea580c">${totalQty} pcs</td>
+    </tr>
+  </tfoot>
 </table>
 
-${rate > 0 ? `
-<div class="totals-wrap">
-  <div class="notes-col">
-    <h4>Production Notes & Terms</h4>
-    <p>Per-piece production job card. Floor supervisors and tailors can scan the QR code above to record finished pieces or update stages.</p>
-  </div>
-  <div class="amounts-col">
-    <table>
-      <tr><td>Base Rate (per pc)</td><td class="r">${r(rate)}</td></tr>
-      <tr><td>Subtotal (Taxable)</td><td class="r">${r(subtotal)}</td></tr>
-      <tr><td>GST (${gstRate}%)</td><td class="r">${r(gstAmount)}</td></tr>
-      <tr class="grand-row"><td>Grand Total</td><td class="r">${r(grandTotal)}</td></tr>
-    </table>
-  </div>
+<div class="floor-note">
+  <h4>Floor Supervisor Instructions</h4>
+  <p>Attach this sheet directly to the cutting lot bundle. Scan the QR code with any mobile device to record completed operations, assign tailors, or advance to stitching/finishing.</p>
 </div>
-` : ''}
 
 </div></body></html>`;
 
   showPrintModal({
     title: product.name,
-    subtitle: `Production Sheet · ${totalQty} pcs`,
-    icon: '👕',
+    subtitle: `Floor Job Sheet · ${totalQty} pcs`,
+    icon: '🏷️',
     html,
     fileName,
   });
