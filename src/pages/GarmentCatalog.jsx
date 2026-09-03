@@ -35,18 +35,26 @@ export default function GarmentCatalog() {
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-xl font-bold text-gray-100">Garments</h2>
         {canEdit && (
-          <button onClick={() => setShowForm(true)} className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm">
+          <button
+            onClick={() => setShowForm(true)}
+            className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm"
+          >
             + Add Garment
           </button>
         )}
       </div>
-      <p className="text-sm text-gray-500 mb-4">Reusable styles — pick one when creating a new order instead of re-entering it.</p>
+      <p className="text-sm text-gray-500 mb-4">
+        Reusable styles — pick one when creating a new order instead of re-entering it.
+      </p>
 
+      {/* Brand Filters */}
       {brands.length > 0 && (
         <div className="flex gap-2 overflow-x-auto pb-3 mb-2">
           <button
             onClick={() => setFilterBrand('')}
-            className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${filterBrand === '' ? 'bg-brand-600 text-white' : 'bg-gray-800 border border-gray-700 text-gray-300'}`}
+            className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${
+              filterBrand === '' ? 'bg-brand-600 text-white' : 'bg-gray-800 border border-gray-700 text-gray-300'
+            }`}
           >
             All Brands
           </button>
@@ -54,7 +62,9 @@ export default function GarmentCatalog() {
             <button
               key={b.id}
               onClick={() => setFilterBrand(b.id)}
-              className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${filterBrand === b.id ? 'bg-brand-600 text-white' : 'bg-gray-800 border border-gray-700 text-gray-300'}`}
+              className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${
+                filterBrand === b.id ? 'bg-brand-600 text-white' : 'bg-gray-800 border border-gray-700 text-gray-300'
+              }`}
             >
               {b.name}
             </button>
@@ -62,12 +72,15 @@ export default function GarmentCatalog() {
         </div>
       )}
 
+      {/* Garments Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
         {filtered.map(g => (
           <div
             key={g.id}
             onClick={canEdit ? () => setEditing(g) : undefined}
-            className={`bg-gray-900 border border-gray-800 rounded-xl overflow-hidden ${canEdit ? 'hover:border-gray-700 cursor-pointer' : ''}`}
+            className={`bg-gray-900 border border-gray-800 rounded-xl overflow-hidden ${
+              canEdit ? 'hover:border-gray-700 cursor-pointer' : ''
+            }`}
           >
             <div className="aspect-square bg-gray-800">
               {g.cover_photo_url ? (
@@ -79,11 +92,22 @@ export default function GarmentCatalog() {
             <div className="p-2.5">
               <p className="font-semibold text-sm truncate text-gray-100">{g.name}</p>
               <p className="text-xs text-gray-400 truncate">{g.brands?.name || 'No brand'}</p>
-              {orderCounts[g.id] > 0 && (
-                <span className="inline-block mt-1.5 text-[11px] px-2 py-0.5 rounded-full bg-gray-800 text-gray-400">
-                  {orderCounts[g.id]} order{orderCounts[g.id] > 1 ? 's' : ''} placed
-                </span>
-              )}
+
+              <div className="flex items-center justify-between mt-2 pt-1 border-t border-gray-800 text-xs">
+                {g.default_price_per_piece != null ? (
+                  <span className="font-semibold text-brand-400">
+                    ₹{Number(g.default_price_per_piece).toLocaleString('en-IN')}
+                  </span>
+                ) : (
+                  <span className="text-gray-500 text-[11px]">No default price</span>
+                )}
+
+                {orderCounts[g.id] > 0 && (
+                  <span className="text-[11px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">
+                    {orderCounts[g.id]} order{orderCounts[g.id] > 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         ))}
@@ -94,8 +118,21 @@ export default function GarmentCatalog() {
         )}
       </div>
 
-      {showForm && <GarmentCatalogForm brands={brands} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); load() }} />}
-      {editing && <GarmentCatalogForm brands={brands} garment={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />}
+      {showForm && (
+        <GarmentCatalogForm
+          brands={brands}
+          onClose={() => setShowForm(false)}
+          onSaved={() => { setShowForm(false); load() }}
+        />
+      )}
+      {editing && (
+        <GarmentCatalogForm
+          brands={brands}
+          garment={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load() }}
+        />
+      )}
     </div>
   )
 }
@@ -105,6 +142,9 @@ export function GarmentCatalogForm({ brands, garment, onClose, onSaved }) {
   const [name, setName] = useState(garment?.name || '')
   const [styleCode, setStyleCode] = useState(garment?.style_code || '')
   const [brandId, setBrandId] = useState(garment?.brand_id || '')
+  const [defaultPrice, setDefaultPrice] = useState(
+    garment?.default_price_per_piece != null ? String(garment.default_price_per_piece) : ''
+  )
   const [file, setFile] = useState(null)
   const [saving, setSaving] = useState(false)
 
@@ -115,7 +155,15 @@ export function GarmentCatalogForm({ brands, garment, onClose, onSaved }) {
     try {
       let cover_photo_url = garment?.cover_photo_url || null
       if (file) cover_photo_url = await uploadPhoto(file, 'garments')
-      const payload = { name: name.trim(), style_code: styleCode.trim() || null, brand_id: brandId || null, cover_photo_url }
+
+      const payload = {
+        name: name.trim(),
+        style_code: styleCode.trim() || null,
+        brand_id: brandId || null,
+        default_price_per_piece: defaultPrice !== '' ? Number(defaultPrice) : null,
+        cover_photo_url,
+      }
+
       if (isEdit) {
         await supabase.from('garments').update(payload).eq('id', garment.id)
       } else {
@@ -146,18 +194,51 @@ export function GarmentCatalogForm({ brands, garment, onClose, onSaved }) {
     <Modal onClose={onClose}>
       <form onSubmit={save}>
         <h3 className="text-lg font-bold mb-4 text-gray-100">{isEdit ? 'Edit Garment' : 'Add Garment'}</h3>
-        {garment?.cover_photo_url && !file && <img src={garment.cover_photo_url} className="w-full h-32 object-cover rounded-lg mb-2" />}
+        {garment?.cover_photo_url && !file && (
+          <div className="w-full h-36 rounded-lg overflow-hidden border border-gray-800 mb-2 flex items-center justify-center bg-gray-900">
+            <img src={garment.cover_photo_url} className="w-full h-full object-cover" />
+          </div>
+        )}
         <label className={labelClass}>Photo</label>
-        <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm text-gray-300" />
+        <input
+          type="file"
+          accept="image/*"
+          onChange={(e) => setFile(e.target.files[0])}
+          className="w-full mb-3 text-sm text-gray-300"
+        />
+
         <label className={labelClass}>Garment name*</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} className={inputClass} placeholder="e.g. Oversized Hoodie" required />
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className={inputClass}
+          placeholder="e.g. Oversized Hoodie"
+          required
+        />
+
         <label className={labelClass}>Style code</label>
-        <input value={styleCode} onChange={(e) => setStyleCode(e.target.value)} className={inputClass} placeholder="optional" />
+        <input
+          value={styleCode}
+          onChange={(e) => setStyleCode(e.target.value)}
+          className={inputClass}
+          placeholder="optional"
+        />
+
         <label className={labelClass}>Brand</label>
         <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className={inputClass}>
           <option value="">No brand</option>
           {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
+
+        <label className={labelClass}>Default Price per piece (₹)</label>
+        <input
+          value={defaultPrice}
+          onChange={(e) => setDefaultPrice(e.target.value.replace(/[^0-9.]/g, ''))}
+          inputMode="decimal"
+          className={inputClass}
+          placeholder="e.g. 550 (auto-fills when creating new order)"
+        />
+
         <FormActions onCancel={onClose} saving={saving} onDelete={isEdit ? remove : null} />
       </form>
     </Modal>
