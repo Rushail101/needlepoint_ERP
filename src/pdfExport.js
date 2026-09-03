@@ -319,3 +319,121 @@ tbody tr:nth-child(even){background:#f8fafc}
     fileName,
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. Employee Work & Payout Summary PDF
+// ─────────────────────────────────────────────────────────────────────────────
+export async function exportEmployeePDF({ employee, logs, dateRange, totalPieces, totalEarnings, WORK_TYPE_LABEL }) {
+  const empName = employee?.name || 'Employee';
+  const role = employee?.role ? employee.role.toUpperCase() : 'TAILOR / WORKER';
+  const rangeText = dateRange?.from && dateRange?.to
+    ? `${fd(dateRange.from)} - ${fd(dateRange.to)}`
+    : `All Time (as of ${fd(new Date())})`;
+
+  const fileName = `PAYOUT_${sanitizeForFilename(empName)}_${sanitizeForFilename(new Date().toISOString().slice(0, 10))}`;
+
+  const logRows = (logs || []).map((l, idx) => {
+    const wt = WORK_TYPE_LABEL?.[l.work_type] || l.work_type || 'General Work';
+    const garment = l.products?.name || 'Garment Lot';
+    const rate = l.rate_per_piece ? r(l.rate_per_piece) : '—';
+    const lineTotal = l.total_amount ? r(l.total_amount) : (l.rate_per_piece && l.pieces ? r(l.rate_per_piece * l.pieces) : '—');
+
+    return `
+      <tr>
+        <td style="text-align:center">${idx + 1}</td>
+        <td>${fd(l.created_at)}</td>
+        <td style="font-weight:700;color:#0f172a">${garment}</td>
+        <td><span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700;background:#f1f5f9;color:#334155">${wt}</span></td>
+        <td style="text-align:right;font-weight:700">${l.pieces || 0} pcs</td>
+        <td style="text-align:right">${rate}</td>
+        <td style="text-align:right;font-weight:700;color:#ea580c">${lineTotal}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>${fileName}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:#111;background:#fff;padding:24px}
+.page{max-width:850px;margin:0 auto}
+.header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;border-bottom:2.5px solid #ea580c;margin-bottom:14px}
+.biz-name{font-size:24px;font-weight:900;color:#0f172a;letter-spacing:-.5px}
+.biz-sub{font-size:10px;text-transform:uppercase;color:#ea580c;font-weight:700;letter-spacing:1px}
+.doc-right{text-align:right}
+.doc-right h1{font-size:22px;font-weight:800;color:#0f172a;letter-spacing:0.5px}
+.doc-right .meta-val{font-size:12px;font-weight:700;color:#475569;margin-top:2px}
+.meta-grid{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid #cbd5e1;background:#f8fafc;margin-bottom:14px;border-radius:6px;overflow:hidden}
+.mc{padding:8px 10px;border-right:1px solid #cbd5e1}
+.mc:last-child{border-right:none}
+.mc .lbl{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
+.mc .val{font-size:11px;font-weight:700;color:#0f172a}
+table{width:100%;border-collapse:collapse;margin-bottom:14px;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden}
+thead th{background:#0f172a;color:#fff;padding:8px 10px;text-align:left;font-size:10px;letter-spacing:.04em;text-transform:uppercase}
+thead th.r{text-align:right}
+tbody td{padding:6.5px 10px;border-bottom:1px solid #e2e8f0;font-size:10.5px}
+tbody tr:nth-child(even){background:#f8fafc}
+.totals-wrap{display:flex;justify-content:flex-end;margin-top:8px}
+.amounts-col{min-width:260px;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden;background:#fff}
+.amounts-col table{border:none;margin:0}
+.amounts-col td{padding:6px 12px;border-bottom:1px solid #f1f5f9}
+.amounts-col .r{text-align:right}
+.amounts-col .grand-row td{font-weight:800;font-size:13px;background:#0f172a;color:#fff;border-bottom:none}
+@media print{body{padding:0}.page{max-width:100%}}
+</style></head><body><div class="page">
+
+<div class="header">
+  <div>
+    <div class="biz-name">NEEDLE POINT</div>
+    <div class="biz-sub">Apparel Manufacturing & Operations</div>
+  </div>
+  <div class="doc-right">
+    <h1>WORK LOG & PAYOUT SHEET</h1>
+    <div class="meta-val">${empName}</div>
+  </div>
+</div>
+
+<div class="meta-grid">
+  <div class="mc"><div class="lbl">Employee / Tailor</div><div class="val">${empName}</div></div>
+  <div class="mc"><div class="lbl">Role</div><div class="val">${role}</div></div>
+  <div class="mc"><div class="lbl">Period</div><div class="val">${rangeText}</div></div>
+  <div class="mc"><div class="lbl">Total Completed</div><div class="val">${totalPieces || 0} pcs</div></div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:30px;text-align:center">#</th>
+      <th>Date</th>
+      <th>Garment Style</th>
+      <th>Operation</th>
+      <th class="r">Pieces</th>
+      <th class="r">Rate / Pc</th>
+      <th class="r">Amount</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${logRows || '<tr><td colspan="7" style="text-align:center;color:#64748b">No logged work entries found</td></tr>'}
+  </tbody>
+</table>
+
+<div class="totals-wrap">
+  <div class="amounts-col">
+    <table>
+      <tr><td>Logged Entries</td><td class="r">${(logs || []).length} logs</td></tr>
+      <tr><td>Total Stitched / Cut</td><td class="r">${totalPieces || 0} pcs</td></tr>
+      <tr class="grand-row"><td>Total Payable</td><td class="r">${r(totalEarnings)}</td></tr>
+    </table>
+  </div>
+</div>
+
+</div></body></html>`;
+
+  showPrintModal({
+    title: `Payout: ${empName}`,
+    subtitle: `${totalPieces || 0} pcs · ${r(totalEarnings)}`,
+    icon: '👤',
+    html,
+    fileName,
+  });
+}
