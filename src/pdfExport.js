@@ -68,19 +68,21 @@ function showPrintModal({ title, subtitle, icon, html, fileName }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Single Product Floor Job Sheet (2x Scale, Zero Financials)
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. Single Product Floor Job Sheet (Scaled to strictly fit 1 A4 Page)
+// ─────────────────────────────────────────────────────────────────────────────
 export async function exportProductPDF({ product, sizes }) {
   const brandName = product.brands?.name || 'Independent';
   const totalQty = (sizes || []).reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
   const docId = product.po_number || `JOB-${product.id.slice(0, 8).toUpperCase()}`;
   const fileName = `JOB_${sanitizeForFilename(docId)}_${sanitizeForFilename(product.name)}`;
 
-  // Mobile logging URL & higher resolution 2x QR code
   const logUrl = `${window.location.origin}/products/${product.id}`;
-  const qrCodeImg = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(logUrl)}`;
+  const qrCodeImg = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(logUrl)}`;
 
   const sizeRows = (sizes || []).map((s, i) => `
     <tr>
-      <td style="text-align:center">${i + 1}</td>
+      <td style="text-align:center;width:36px">${i + 1}</td>
       <td style="font-weight:700">${s.size_label}</td>
       <td style="text-align:right;font-weight:900;color:#0f172a">${s.quantity} pcs</td>
     </tr>
@@ -90,57 +92,62 @@ export async function exportProductPDF({ product, sizes }) {
 <title>${fileName}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:20px;color:#111;background:#fff;padding:32px}
-.page{max-width:980px;margin:0 auto}
+body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:14px;color:#111;background:#fff;padding:16px}
+.page{max-width:760px;margin:0 auto;height:100%}
 
 /* Header */
-.header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:18px;border-bottom:5px solid #ea580c;margin-bottom:24px}
-.biz-name{font-size:42px;font-weight:900;letter-spacing:-1px;color:#0f172a;line-height:1}
-.biz-sub{font-size:18px;text-transform:uppercase;color:#ea580c;font-weight:800;letter-spacing:1.5px;margin-top:6px}
+.header{display:flex;justify-content:space-between;align-items:flex-end;padding-bottom:10px;border-bottom:3.5px solid #ea580c;margin-bottom:12px}
+.biz-name{font-size:28px;font-weight:900;letter-spacing:-0.5px;color:#0f172a;line-height:1}
+.biz-sub{font-size:11px;text-transform:uppercase;color:#ea580c;font-weight:800;letter-spacing:1px;margin-top:4px}
 .doc-right{text-align:right}
-.doc-right h1{font-size:36px;font-weight:900;color:#0f172a;letter-spacing:0.5px;line-height:1.1}
-.doc-right .meta-val{font-size:24px;font-weight:800;color:#ea580c;margin-top:6px;font-family:monospace}
+.doc-right h1{font-size:24px;font-weight:900;color:#0f172a;letter-spacing:0.5px;line-height:1}
+.doc-right .meta-val{font-size:16px;font-weight:800;color:#ea580c;margin-top:4px;font-family:monospace}
 
-/* Meta Grid */
-.meta-grid{display:grid;grid-template-columns:repeat(4,1fr);border:2px solid #cbd5e1;background:#f8fafc;margin-bottom:24px;border-radius:12px;overflow:hidden}
-.mc{padding:14px 18px;border-right:2px solid #cbd5e1}
+/* Meta 4-Block Grid */
+.meta-grid{display:grid;grid-template-columns:repeat(4,1fr);border:1.5px solid #cbd5e1;background:#f8fafc;margin-bottom:14px;border-radius:8px;overflow:hidden}
+.mc{padding:8px 12px;border-right:1.5px solid #cbd5e1}
 .mc:last-child{border-right:none}
-.mc .lbl{font-size:15px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;font-weight:700}
-.mc .val{font-size:22px;font-weight:900;color:#0f172a}
+.mc .lbl{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;font-weight:700}
+.mc .val{font-size:15px;font-weight:900;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-/* Garment & 2X Photo & 2X QR */
-.garment-box{display:flex;align-items:center;gap:28px;border:2px solid #cbd5e1;padding:24px;border-radius:12px;margin-bottom:24px;background:#fff}
-.img-container{width:220px;height:240px;border-radius:12px;overflow:hidden;border:2px solid #cbd5e1;background:#f8fafc;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+/* Main Visual Box: Large Photo + Details + Big QR */
+.garment-box{display:flex;align-items:center;gap:18px;border:1.5px solid #cbd5e1;padding:12px 14px;border-radius:8px;margin-bottom:14px;background:#fff}
+.img-container{width:160px;height:170px;border-radius:8px;overflow:hidden;border:1.5px solid #cbd5e1;background:#f8fafc;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .garment-img{max-width:100%;max-height:100%;object-fit:contain}
 .garment-info{flex:1;min-width:0}
-.garment-info h2{font-size:32px;font-weight:900;color:#0f172a;margin-bottom:8px;line-height:1.2}
-.garment-info p{font-size:20px;color:#334155;line-height:1.6}
-.chips{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
-.chip{padding:6px 14px;border-radius:8px;font-size:16px;font-weight:800;background:#f1f5f9;color:#334155;border:2px solid #cbd5e1}
+.garment-info h2{font-size:22px;font-weight:900;color:#0f172a;margin-bottom:4px;line-height:1.2}
+.garment-info p{font-size:14px;color:#334155;line-height:1.5}
+.chips{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.chip{padding:3px 8px;border-radius:6px;font-size:11px;font-weight:800;background:#f1f5f9;color:#334155;border:1px solid #cbd5e1}
 .chip-orange{background:#fff7ed;color:#c2410c;border-color:#fdba74}
 
-/* QR Code Section (2x) */
-.qr-box{text-align:center;padding-left:24px;border-left:2px dashed #cbd5e1;flex-shrink:0}
-.qr-box img{width:160px;height:160px;display:block;margin:0 auto 8px auto;border-radius:6px}
-.qr-lbl{font-size:15px;font-weight:900;color:#0f172a;text-transform:uppercase;letter-spacing:0.05em}
-.qr-sub{font-size:13px;color:#64748b;font-weight:600}
+/* Big Scan QR */
+.qr-box{text-align:center;padding-left:14px;border-left:1.5px dashed #cbd5e1;flex-shrink:0}
+.qr-box img{width:125px;height:125px;display:block;margin:0 auto 4px auto}
+.qr-lbl{font-size:11px;font-weight:900;color:#0f172a;text-transform:uppercase;letter-spacing:0.04em}
+.qr-sub{font-size:9.5px;color:#64748b;font-weight:600}
 
 /* Sizes Table */
-table{width:100%;border-collapse:collapse;margin-bottom:24px;border:2px solid #cbd5e1;border-radius:12px;overflow:hidden}
-thead th{background:#0f172a;color:#fff;padding:14px 18px;text-align:left;font-size:18px;letter-spacing:.05em;text-transform:uppercase}
-tbody td{padding:14px 18px;border-bottom:2px solid #e2e8f0;font-size:20px}
+table{width:100%;border-collapse:collapse;margin-bottom:14px;border:1.5px solid #cbd5e1;border-radius:8px;overflow:hidden}
+thead th{background:#0f172a;color:#fff;padding:8px 12px;text-align:left;font-size:12px;letter-spacing:.05em;text-transform:uppercase}
+tbody td{padding:7px 12px;border-bottom:1px solid #e2e8f0;font-size:14px}
 tbody tr:nth-child(even){background:#f8fafc}
-tfoot td{padding:16px 18px;font-size:22px;font-weight:900;background:#f1f5f9;border-top:3px solid #0f172a}
+tfoot td{padding:9px 12px;font-size:15px;font-weight:900;background:#f1f5f9;border-top:2px solid #0f172a}
 
-/* Floor Instructions */
-.floor-note{border:2px solid #cbd5e1;background:#f8fafc;border-radius:12px;padding:16px 20px}
-.floor-note h4{font-size:16px;text-transform:uppercase;color:#64748b;font-weight:800;margin-bottom:6px}
-.floor-note p{font-size:17px;color:#334155;line-height:1.5}
+/* Bundle / Floor Note */
+.floor-note{border:1.5px solid #cbd5e1;background:#f8fafc;border-radius:8px;padding:10px 14px}
+.floor-note h4{font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;margin-bottom:3px}
+.floor-note p{font-size:12px;color:#334155;line-height:1.4}
+
+@page {
+  size: A4 portrait;
+  margin: 10mm;
+}
 
 @media print{
   body{padding:0}
-  .page{max-width:100%}
-  @page { margin: 12mm; }
+  .page{max-width:100%;height:auto}
+  table, tr, td, th { page-break-inside: avoid !important; }
 }
 </style></head><body><div class="page">
 
@@ -158,7 +165,7 @@ tfoot td{padding:16px 18px;font-size:22px;font-weight:900;background:#f1f5f9;bor
 <div class="meta-grid">
   <div class="mc"><div class="lbl">Brand</div><div class="val">${brandName}</div></div>
   <div class="mc"><div class="lbl">Date</div><div class="val">${fd(new Date())}</div></div>
-  <div class="mc"><div class="lbl">Current Stage</div><div class="val">${(product.stage || 'CUTTING').toUpperCase()}</div></div>
+  <div class="mc"><div class="lbl">Stage</div><div class="val">${(product.stage || 'CUTTING').toUpperCase()}</div></div>
   <div class="mc"><div class="lbl">Total Quantity</div><div class="val" style="color:#ea580c">${totalQty} pcs</div></div>
 </div>
 
@@ -182,14 +189,14 @@ tfoot td{padding:16px 18px;font-size:22px;font-weight:900;background:#f1f5f9;bor
   <div class="qr-box">
     <img src="${qrCodeImg}" alt="Log QR" />
     <div class="qr-lbl">Scan to Log</div>
-    <div class="qr-sub">Update Stage & Tailor Work</div>
+    <div class="qr-sub">Update Stage & Work</div>
   </div>
 </div>
 
 <table>
   <thead>
     <tr>
-      <th style="width:60px;text-align:center">#</th>
+      <th style="width:36px;text-align:center">#</th>
       <th>Size Label</th>
       <th style="text-align:right">Planned Quantity</th>
     </tr>
@@ -207,7 +214,7 @@ tfoot td{padding:16px 18px;font-size:22px;font-weight:900;background:#f1f5f9;bor
 
 <div class="floor-note">
   <h4>Floor Supervisor Instructions</h4>
-  <p>Attach this sheet directly to the cutting lot bundle. Scan the QR code with any mobile device to record completed operations, assign tailors, or advance to stitching/finishing.</p>
+  <p>Attach this sheet to the cutting lot bundle. Scan the QR code using any smartphone camera to update the lot stage or log completed tailor pieces.</p>
 </div>
 
 </div></body></html>`;
