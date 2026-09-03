@@ -1,20 +1,19 @@
 import jsPDF from 'jspdf'
-import 'jspdf-autotable'
+import autoTable from 'jspdf-autotable'
 
-// Helper to format currency
 const inr = (n) => `INR ${(Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 
-// 1. Colorful Single Product PDF
+// 1. Single Product PDF
 export async function exportProductPDF({ product, sizes, photos, logs, workTypeLabel }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
   const pageWidth = doc.internal.pageSize.getWidth()
   
   // Header Banner
-  doc.setFillColor(15, 23, 42) // Slate 900
+  doc.setFillColor(15, 23, 42)
   doc.rect(0, 0, pageWidth, 75, 'F')
 
   // Accent Line
-  doc.setFillColor(234, 88, 12) // Brand Orange
+  doc.setFillColor(234, 88, 12)
   doc.rect(0, 75, pageWidth, 4, 'F')
 
   // Title & Brand
@@ -36,7 +35,7 @@ export async function exportProductPDF({ product, sizes, photos, logs, workTypeL
   doc.text(`Generated: ${new Date().toLocaleDateString('en-IN')}`, pageWidth - 40, 58, { align: 'right' })
 
   // Summary Card Box
-  doc.setFillColor(248, 250, 252) // Slate 50
+  doc.setFillColor(248, 250, 252)
   doc.setDrawColor(226, 232, 240)
   doc.roundedRect(40, 95, pageWidth - 80, 70, 6, 6, 'FD')
 
@@ -66,7 +65,7 @@ export async function exportProductPDF({ product, sizes, photos, logs, workTypeL
   doc.text('SIZE & QUANTITY BREAKDOWN', 40, startY)
 
   const sizeRows = (sizes || []).map(s => [s.size_label, `${s.quantity} pcs`])
-  doc.autoTable({
+  autoTable(doc, {
     startY: startY + 8,
     margin: { left: 40, right: 40 },
     head: [['Size Label', 'Quantity']],
@@ -75,9 +74,9 @@ export async function exportProductPDF({ product, sizes, photos, logs, workTypeL
     alternateRowStyles: { fillColor: [248, 250, 252] },
   })
 
-  startY = doc.lastAutoTable.finalY + 25
+  startY = (doc.lastAutoTable?.finalY || startY + 50) + 25
 
-  // Financial Breakdown Table (If pricing exists)
+  // Financial Breakdown Table
   if (product.price_per_piece) {
     const rate = Number(product.price_per_piece)
     const subtotal = rate * totalQty
@@ -88,7 +87,7 @@ export async function exportProductPDF({ product, sizes, photos, logs, workTypeL
     doc.setFont('helvetica', 'bold')
     doc.text('FINANCIAL SUMMARY', 40, startY)
 
-    doc.autoTable({
+    autoTable(doc, {
       startY: startY + 8,
       margin: { left: 40, right: 40 },
       body: [
@@ -101,7 +100,7 @@ export async function exportProductPDF({ product, sizes, photos, logs, workTypeL
       theme: 'grid',
     })
 
-    startY = doc.lastAutoTable.finalY + 25
+    startY = (doc.lastAutoTable?.finalY || startY + 50) + 25
   }
 
   // Work Log & Planned Work
@@ -116,15 +115,14 @@ export async function exportProductPDF({ product, sizes, photos, logs, workTypeL
     doc.text(product.planned_work.map(w => `• ${w}`).join('    '), 40, startY + 15)
   }
 
-  doc.save(`${product.name.replace(/\s+/g, '_')}_Job_Sheet.pdf`)
+  doc.save(`${(product.name || 'Order').replace(/\s+/g, '_')}_Job_Sheet.pdf`)
 }
 
-// 2. Multi-Product Batch PDF (For entire PO Runs)
+// 2. Multi-Product Batch PDF
 export async function exportBatchOrderPDF({ batch, brandName }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
   const pageWidth = doc.internal.pageSize.getWidth()
 
-  // Header
   doc.setFillColor(15, 23, 42)
   doc.rect(0, 0, pageWidth, 80, 'F')
   doc.setFillColor(234, 88, 12)
@@ -146,12 +144,11 @@ export async function exportBatchOrderPDF({ batch, brandName }) {
   doc.setFontSize(9)
   doc.text(`Date: ${new Date().toLocaleDateString('en-IN')}`, pageWidth - 40, 62, { align: 'right' })
 
-  // Batch Overview
-  const totalQty = batch.items.reduce((acc, p) => {
+  const totalQty = (batch.items || []).reduce((acc, p) => {
     return acc + (p.product_sizes || []).reduce((qAcc, s) => qAcc + (Number(s.quantity) || 0), 0)
   }, 0)
 
-  const combinedGrandTotal = batch.items.reduce((acc, p) => {
+  const combinedGrandTotal = (batch.items || []).reduce((acc, p) => {
     if (p.total_amount != null) return acc + Number(p.total_amount)
     const pQty = (p.product_sizes || []).reduce((qAcc, s) => qAcc + (Number(s.quantity) || 0), 0)
     const pSub = p.price_per_piece ? Number(p.price_per_piece) * pQty : 0
@@ -166,13 +163,12 @@ export async function exportBatchOrderPDF({ batch, brandName }) {
   doc.setFontSize(11)
   doc.setFont('helvetica', 'bold')
   doc.text(`Client Brand: ${brandName || 'Independent'}`, 55, 122)
-  doc.text(`Total Styles: ${batch.items.length}    |    Total Volume: ${totalQty} pcs`, 55, 137)
+  doc.text(`Total Styles: ${batch.items?.length || 0}    |    Total Volume: ${totalQty} pcs`, 55, 137)
 
   doc.setTextColor(234, 88, 12)
   doc.text(`Batch Total: ${inr(combinedGrandTotal)}`, pageWidth - 55, 130, { align: 'right' })
 
-  // Items Table
-  const tableRows = batch.items.map((it, idx) => {
+  const tableRows = (batch.items || []).map((it, idx) => {
     const qty = (it.product_sizes || []).reduce((qAcc, s) => qAcc + (Number(s.quantity) || 0), 0)
     const sizeSummary = (it.product_sizes || []).map(s => `${s.size_label}:${s.quantity}`).join(', ') || 'Free Size'
     const totalAmt = it.total_amount ? inr(it.total_amount) : (it.price_per_piece ? inr(it.price_per_piece * qty) : '-')
@@ -188,7 +184,7 @@ export async function exportBatchOrderPDF({ batch, brandName }) {
     ]
   })
 
-  doc.autoTable({
+  autoTable(doc, {
     startY: 165,
     margin: { left: 40, right: 40 },
     head: [['#', 'Garment Style', 'Stage', 'Sizes Breakdown', 'Qty', 'Rate', 'Total']],
