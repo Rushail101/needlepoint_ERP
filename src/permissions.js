@@ -1,24 +1,51 @@
-// Single source of truth for what each role can do.
-// admin          — everything, including managing floor manager / worker access
-// floor_manager  — logs and edits work, manages sample versions, updates order stage
-// worker         — view-only on Garments, Orders, and Brands
-
-const RULES = {
-  admin: [
-    'view_brands', 'view_team', 'view_access', 'view_pricing',
-    'edit_garments', 'delete_garments', 'manage_sizes', 'manage_photos',
-    'manage_garment_catalog', 'manage_brands', 'manage_team',
-    'manage_work_logs', 'manage_samples', 'change_stage', 'manage_access', 'export_pdf',
-  ],
-  floor_manager: [
-    'manage_work_logs', 'manage_samples', 'change_stage', 'export_pdf',
-  ],
-  worker: [
-    'view_brands',
-  ],
+// src/permissions.js
+export const ROLES = {
+  admin: {
+    label: 'Admin',
+    can: [
+      'view_orders',
+      'create_orders',
+      'edit_garments',
+      'delete_garments',
+      'manage_garment_catalog',
+      'view_financials',
+      'log_work',
+      'view_work_logs',
+      'manage_employees',
+      'manage_brands',
+      'manage_pins',
+    ],
+  },
+  manager: {
+    label: 'Manager',
+    can: [
+      'view_orders',
+      'create_orders',
+      'edit_garments',
+      'manage_garment_catalog',
+      'view_financials',
+      'log_work',
+      'view_work_logs',
+    ],
+  },
+  tailor: {
+    label: 'Tailor',
+    can: ['view_orders', 'log_work'],
+  },
+  client: {
+    label: 'Client',
+    can: [
+      'view_orders',
+      'create_orders',
+      'manage_garment_catalog',
+      'view_financials',
+    ],
+  },
 }
 
 export function can(user, action) {
-  const role = user?.role || 'worker'
-  return (RULES[role] || []).includes(action)
+  if (!user || !user.role) return false
+  const roleConfig = ROLES[user.role.toLowerCase()]
+  if (!roleConfig) return false
+  return roleConfig.can.includes(action)
 }
