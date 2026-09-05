@@ -12,6 +12,7 @@ export const ROLES = {
       'delete_garments',
       'manage_garment_catalog',
       'view_financials',
+      'edit_financials', // Admin only
       'log_work',
       'manage_employees',
       'manage_brands',
@@ -28,8 +29,8 @@ export const ROLES = {
       'create_orders',
       'edit_garments',
       'manage_garment_catalog',
-      'view_financials',
       'log_work',
+      // 'view_financials' and 'edit_financials' removed
     ],
   },
   tailor: {
@@ -42,7 +43,7 @@ export const ROLES = {
       'view_orders',
       'create_orders',
       'manage_garment_catalog',
-      'view_financials',
+      'view_financials', // Read-only viewing
     ],
   },
 }
@@ -50,8 +51,6 @@ export const ROLES = {
 export function can(user, action) {
   if (!user) return false
   const role = String(user.role || '').toLowerCase()
-
-  // Master override: Admin always has access to all actions and tabs
   if (role === 'admin' || user.name === 'Admin') return true
 
   const roleConfig = ROLES[role]
