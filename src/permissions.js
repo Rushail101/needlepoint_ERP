@@ -2,13 +2,10 @@ export const ROLES = {
   admin: {
     label: 'Admin',
     can: [
-      // View permissions checked by navItems:
       'view_brands',
       'view_team',
       'manage_work_logs',
       'view_access',
-
-      // Action permissions:
       'view_orders',
       'create_orders',
       'edit_garments',
@@ -51,9 +48,13 @@ export const ROLES = {
 }
 
 export function can(user, action) {
-  if (!user || !user.role) return false
-  const roleKey = String(user.role).toLowerCase()
-  const roleConfig = ROLES[roleKey]
+  if (!user) return false
+  const role = String(user.role || '').toLowerCase()
+
+  // Master override: Admin always has access to all actions and tabs
+  if (role === 'admin' || user.name === 'Admin') return true
+
+  const roleConfig = ROLES[role]
   if (!roleConfig) return false
   return roleConfig.can.includes(action)
 }
