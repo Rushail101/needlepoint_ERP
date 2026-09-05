@@ -39,20 +39,18 @@ export default function NewOrder() {
   useEffect(() => {
     const loadPrerequisites = async () => {
       try {
-        // If client, only load their own brand and garments
         if (isClient && user?.brandId) {
           setBrandId(user.brandId)
           const [{ data: b }, { data: gList }] = await Promise.all([
             supabase.from('brands').select('*').eq('id', user.brandId).maybeSingle(),
-            supabase.from('garments').select('*').eq('brand_id', user.brandId).order('name')
+            supabase.from('garments').select('*').eq('brand_id', user.brandId).order('name'),
           ])
           if (b) setBrands([b])
           setSavedGarments(gList || [])
         } else {
-          // Admin / Staff: load all
           const [{ data: brs }, { data: gList }] = await Promise.all([
             supabase.from('brands').select('*').order('name'),
-            supabase.from('garments').select('*').order('name')
+            supabase.from('garments').select('*').order('name'),
           ])
           setBrands(brs || [])
           setSavedGarments(gList || [])
@@ -64,105 +62,39 @@ export default function NewOrder() {
     loadPrerequisites()
   }, [isClient, user?.brandId])
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    for (const it of items) {
-      if (!it.name.trim()) {
-        alert('Please provide a name for all garments in this order.')
-        return
-      }
-    }
-
-    setSubmitting(true)
-    try {
-      const finalBrandId = isClient ? user.brandId : (brandId || null)
-      const cleanPo = poNumber.trim().toUpperCase() || null
-
-      for (const it of items) {
-        let finalPhoto = it.coverPhotoUrl || null
-        if (it.file) {
-          finalPhoto = await uploadPhoto(it.file, 'products')
+  const pickGarment = (idx, gId) => {
+    const g = savedGarments.find((x) => x.id === gId)
+    setItems((prev) =>
+      prev.map((it, i) => {
+        if (i !== idx) return it
+        if (!gId || !g) {
+          return {
+            ...it,
+            pickedGarmentId: '',
+            name: '',
+            styleCode: '',
+            coverPhotoUrl: null,
+            file: null,
+            pdfFile: null,
+            techPackUrl: null,
+            pricePerPiece: '',
+          }
         }
-
-        let finalPdfUrl = it.techPackUrl || null
-        if (it.pdfFile) {
-          finalPdfUrl = await uploadPhoto(it.pdfFile, 'garments')
+        return {
+          ...it,
+          pickedGarmentId: g.id,
+          name: g.name,
+          styleCode: g.style_code || '',
+          coverPhotoUrl: g.cover_photo_url || null,
+          techPackUrl: g.tech_pack_url || null,
+          file: null,
+          pdfFile: null,
+          pricePerPiece: g.default_price_per_piece != null ? String(g.default_price_per_piece) : it.pricePerPiece,
         }
-
-        // Strictly convert empty string to null for foreign key
-        let garmentId = it.pickedGarmentId ? it.pickedGarmentId : null
-
-        if (!garmentId && it.saveToCatalog) {
-          const { data: newG, error: gErr } = await supabase
-            .from('garments')
-            .insert({
-              name: it.name.trim(),
-              style_code: it.styleCode.trim() || null,
-              brand_id: finalBrandId,
-              cover_photo_url: finalPhoto,
-              tech_pack_url: finalPdfUrl,
-              default_price_per_piece: !isClient && it.pricePerPiece ? Number(it.pricePerPiece) : null,
-            })
-            .select()
-            .single()
-          if (gErr) throw gErr
-          garmentId = newG.id
-        }
-
-        const validSizes = it.sizes.filter((s) => parseInt(s.quantity, 10) > 0)
-        const totalUnits = validSizes.reduce((sum, s) => sum + parseInt(s.quantity, 10), 0)
-        const rate = it.pricePerPiece ? Number(it.pricePerPiece) : null
-        const sub = rate && totalUnits > 0 ? rate * totalUnits : 0
-        const slab = Number(it.gstRate || 5)
-        const grand = sub > 0 ? Math.round(sub + (sub * slab) / 100) : null
-
-        // Build product payload strictly sanitizing empty fields
-        const productPayload = {
-          name: it.name.trim(),
-          style_code: it.styleCode.trim() || null,
-          brand_id: finalBrandId,
-          po_number: cleanPo,
-          status: isClient ? 'in_production' : status,
-          stage: 'cutting',
-          planned_work: it.plannedWork || ['cutting', 'stitching', 'finishing'],
-          cover_photo_url: finalPhoto,
-          tech_pack_url: finalPdfUrl,
-          garment_id: garmentId, // guaranteed UUID or null
-          price_per_piece: rate,
-          gst_rate: slab,
-          total_amount: grand,
-        }
-
-        const { data: prod, error: pErr } = await supabase
-          .from('products')
-          .insert(productPayload)
-          .select()
-          .single()
-        
-        if (pErr) {
-          console.error('Supabase Product Insert Error:', pErr)
-          throw new Error(pErr.message || 'Error creating product record')
-        }
-
-        if (validSizes.length > 0) {
-          const sizeInserts = validSizes.map((s) => ({
-            product_id: prod.id,
-            size_label: s.size_label.trim().toUpperCase(),
-            quantity: parseInt(s.quantity, 10),
-          }))
-          const { error: sErr } = await supabase.from('product_sizes').insert(sizeInserts)
-          if (sErr) throw sErr
-        }
-      }
-
-      navigate('/orders')
-    } catch (err) {
-      console.error('Submit Error:', err)
-      alert('Could not place order: ' + err.message)
-    } finally {
-      setSubmitting(false)
-    }
+      })
+    )
   }
+
   const addItem = () => {
     setItems((prev) => [
       ...prev,
@@ -201,20 +133,21 @@ export default function NewOrder() {
     setSubmitting(true)
     try {
       const finalBrandId = isClient ? user.brandId : (brandId || null)
-      const cleanPo = poNumber.trim().toUpperCase()
+      const cleanPo = poNumber.trim().toUpperCase() || null
 
       for (const it of items) {
-        let finalPhoto = it.coverPhotoUrl
+        let finalPhoto = it.coverPhotoUrl || null
         if (it.file) {
           finalPhoto = await uploadPhoto(it.file, 'products')
         }
 
-        let finalPdfUrl = it.techPackUrl
+        let finalPdfUrl = it.techPackUrl || null
         if (it.pdfFile) {
           finalPdfUrl = await uploadPhoto(it.pdfFile, 'garments')
         }
 
-        let garmentId = it.pickedGarmentId || null
+        let garmentId = it.pickedGarmentId ? it.pickedGarmentId : null
+
         if (!garmentId && it.saveToCatalog) {
           const { data: newG, error: gErr } = await supabase
             .from('garments')
@@ -239,26 +172,32 @@ export default function NewOrder() {
         const slab = Number(it.gstRate || 5)
         const grand = sub > 0 ? Math.round(sub + (sub * slab) / 100) : null
 
+        const productPayload = {
+          name: it.name.trim(),
+          style_code: it.styleCode.trim() || null,
+          brand_id: finalBrandId,
+          po_number: cleanPo,
+          status: isClient ? 'in_production' : status,
+          stage: 'cutting',
+          planned_work: it.plannedWork || ['cutting', 'stitching', 'finishing'],
+          cover_photo_url: finalPhoto,
+          tech_pack_url: finalPdfUrl,
+          garment_id: garmentId,
+          price_per_piece: rate,
+          gst_rate: slab,
+          total_amount: grand,
+        }
+
         const { data: prod, error: pErr } = await supabase
           .from('products')
-          .insert({
-            name: it.name.trim(),
-            style_code: it.styleCode.trim() || null,
-            brand_id: finalBrandId,
-            po_number: cleanPo || null,
-            status: isClient ? 'in_production' : status,
-            stage: 'cutting',
-            planned_work: it.plannedWork,
-            cover_photo_url: finalPhoto,
-            tech_pack_url: finalPdfUrl,
-            garment_id: garmentId,
-            price_per_piece: rate,
-            gst_rate: slab,
-            total_amount: grand,
-          })
+          .insert(productPayload)
           .select()
           .single()
-        if (pErr) throw pErr
+
+        if (pErr) {
+          console.error('Supabase Product Insert Error:', pErr)
+          throw new Error(pErr.message || 'Error creating product record')
+        }
 
         if (validSizes.length > 0) {
           const sizeInserts = validSizes.map((s) => ({
@@ -273,6 +212,7 @@ export default function NewOrder() {
 
       navigate('/orders')
     } catch (err) {
+      console.error('Submit Error:', err)
       alert('Could not place order: ' + err.message)
     } finally {
       setSubmitting(false)
@@ -292,7 +232,6 @@ export default function NewOrder() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Run-Level Header Information */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className={labelClass}>Client Brand*</label>
@@ -341,7 +280,6 @@ export default function NewOrder() {
           )}
         </div>
 
-        {/* Garment Items in this Run */}
         <div className="space-y-4">
           {items.map((it, idx) => (
             <div key={it.id} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 sm:p-5 relative space-y-3">
@@ -406,7 +344,6 @@ export default function NewOrder() {
                 </div>
               </div>
 
-              {/* Price handling: Editable for staff, read-only tag for client */}
               {!isClient ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
@@ -450,7 +387,6 @@ export default function NewOrder() {
                 )
               )}
 
-              {/* Photos & Mockup PDF Uploads */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                 <div>
                   <label className={labelClass}>Cover Photo</label>
@@ -497,7 +433,6 @@ export default function NewOrder() {
                 </div>
               </div>
 
-              {/* Sizes & Quantities Matrix */}
               <div>
                 <label className={labelClass}>Sizes & Quantities</label>
                 <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
