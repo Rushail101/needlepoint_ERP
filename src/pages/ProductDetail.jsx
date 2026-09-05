@@ -9,6 +9,7 @@ import { useAuth } from '../components/PinGate.jsx'
 import { can } from '../permissions.js'
 import { WORK_TYPES, WORK_TYPE_LABEL } from '../workTypes.js'
 import { buildOrderSummaryText, buildWhatsAppUrl } from '../orderSummary.js'
+import ShipmentModal from '../components/ShipmentModal.jsx'
 
 export default function ProductDetail() {
   const { id } = useParams()
