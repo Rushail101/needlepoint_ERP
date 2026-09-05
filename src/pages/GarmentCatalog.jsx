@@ -6,7 +6,9 @@ import { can } from '../permissions.js'
 
 export default function GarmentCatalog() {
   const { user } = useAuth()
+  const isClient = user?.role === 'client'
   const canEdit = can(user, 'manage_garment_catalog')
+
   const [garments, setGarments] = useState([])
   const [brands, setBrands] = useState([])
   const [orderCounts, setOrderCounts] = useState({})
@@ -15,7 +17,12 @@ export default function GarmentCatalog() {
   const [editing, setEditing] = useState(null)
 
   const load = async () => {
-    const { data: g } = await supabase.from('garments').select('*, brands(name)').order('name')
+    let gQuery = supabase.from('garments').select('*, brands(name)').order('name')
+    if (isClient && user?.brandId) {
+      gQuery = gQuery.eq('brand_id', user.brandId)
+    }
+
+    const { data: g } = await gQuery
     const { data: b } = await supabase.from('brands').select('*').order('name')
     setGarments(g || [])
     setBrands(b || [])
@@ -26,14 +33,17 @@ export default function GarmentCatalog() {
     setOrderCounts(counts)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [user?.brandId])
 
-  const filtered = garments.filter(g => (filterBrand ? g.brand_id === filterBrand : true))
+  const filtered = garments.filter(g => (!isClient && filterBrand ? g.brand_id === filterBrand : true))
 
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <h2 className="text-xl font-bold text-gray-100">Garments</h2>
+        <div>
+          <h2 className="text-xl font-bold text-gray-100">Garments Catalog</h2>
+          {isClient && <p className="text-xs text-brand-400 font-medium">{user.name}'s Saved Styles</p>}
+        </div>
         {canEdit && (
           <button
             onClick={() => setShowForm(true)}
@@ -47,8 +57,7 @@ export default function GarmentCatalog() {
         Reusable styles — pick one when creating a new order instead of re-entering it.
       </p>
 
-      {/* Brand Filters */}
-      {brands.length > 0 && (
+      {!isClient && brands.length > 0 && (
         <div className="flex gap-2 overflow-x-auto pb-3 mb-2">
           <button
             onClick={() => setFilterBrand('')}
@@ -72,7 +81,6 @@ export default function GarmentCatalog() {
         </div>
       )}
 
-      {/* Garments Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
         {filtered.map(g => (
           <div
@@ -112,7 +120,7 @@ export default function GarmentCatalog() {
           </div>
         ))}
         {filtered.length === 0 && (
-          <p className="text-gray-500 text-sm col-span-full">
+          <p className="text-gray-500 text-sm col-span-full py-8 text-center">
             {filterBrand ? 'No garments found for this brand.' : 'No garments saved yet.'}
           </p>
         )}
@@ -138,10 +146,13 @@ export default function GarmentCatalog() {
 }
 
 export function GarmentCatalogForm({ brands, garment, onClose, onSaved }) {
+  const { user } = useAuth()
+  const isClient = user?.role === 'client'
   const isEdit = !!garment
+
   const [name, setName] = useState(garment?.name || '')
   const [styleCode, setStyleCode] = useState(garment?.style_code || '')
-  const [brandId, setBrandId] = useState(garment?.brand_id || '')
+  const [brandId, setBrandId] = useState(garment?.brand_id || (isClient ? user.brandId : ''))
   const [defaultPrice, setDefaultPrice] = useState(
     garment?.default_price_per_piece != null ? String(garment.default_price_per_piece) : ''
   )
@@ -156,10 +167,12 @@ export function GarmentCatalogForm({ brands, garment, onClose, onSaved }) {
       let cover_photo_url = garment?.cover_photo_url || null
       if (file) cover_photo_url = await uploadPhoto(file, 'garments')
 
+      const finalBrandId = isClient ? user.brandId : (brandId || null)
+
       const payload = {
         name: name.trim(),
         style_code: styleCode.trim() || null,
-        brand_id: brandId || null,
+        brand_id: finalBrandId,
         default_price_per_piece: defaultPrice !== '' ? Number(defaultPrice) : null,
         cover_photo_url,
       }
@@ -171,14 +184,14 @@ export function GarmentCatalogForm({ brands, garment, onClose, onSaved }) {
       }
       onSaved()
     } catch (err) {
-      alert('Could not save: ' + err.message)
+      alert('Could not save garment: ' + err.message)
     } finally {
       setSaving(false)
     }
   }
 
   const remove = async () => {
-    if (!confirm(`Delete "${garment.name}" from the catalog? Existing orders made from it are kept — only the reusable reference is removed.`)) return
+    if (!confirm(`Delete "${garment.name}" from catalog? Existing orders referencing it are retained.`)) return
     setSaving(true)
     try {
       await supabase.from('garments').delete().eq('id', garment.id)
@@ -224,11 +237,15 @@ export function GarmentCatalogForm({ brands, garment, onClose, onSaved }) {
           placeholder="optional"
         />
 
-        <label className={labelClass}>Brand</label>
-        <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className={inputClass}>
-          <option value="">No brand</option>
-          {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
+        {!isClient && (
+          <div>
+            <label className={labelClass}>Brand</label>
+            <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className={inputClass}>
+              <option value="">No brand</option>
+              {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+        )}
 
         <label className={labelClass}>Default Price per piece (₹)</label>
         <input
