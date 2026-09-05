@@ -32,6 +32,7 @@ export default function ProductDetail() {
   const [tab, setTab] = useState('sizes')
   const [editingProduct, setEditingProduct] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [showShipments, setShowShipments] = useState(false)
 
   const load = async () => {
     const { data: p } = await supabase.from('products').select('*, brands(name, contact_phone)').eq('id', id).single()
