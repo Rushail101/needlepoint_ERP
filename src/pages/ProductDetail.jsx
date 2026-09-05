@@ -13,8 +13,11 @@ export default function ProductDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const isClient = user?.role === 'client'
+
   const canEdit = can(user, 'edit_garments')
   const canLog = can(user, 'log_work')
+  const showFinancials = can(user, 'view_financials')
 
   const [product, setProduct] = useState(null)
   const [sizes, setSizes] = useState([])
@@ -32,14 +35,19 @@ export default function ProductDetail() {
 
   const loadProduct = async () => {
     setLoading(true)
-    const { data: prod, error } = await supabase
+    let prodQuery = supabase
       .from('products')
       .select('*, brands(name), shipments(size_label, quantity, dispatched_at)')
       .eq('id', id)
-      .single()
+
+    if (isClient && user?.brandId) {
+      prodQuery = prodQuery.eq('brand_id', user.brandId)
+    }
+
+    const { data: prod, error } = await prodQuery.single()
 
     if (error || !prod) {
-      alert('Order not found')
+      alert('Order not found or permission denied.')
       navigate('/orders')
       return
     }
@@ -63,7 +71,7 @@ export default function ProductDetail() {
 
   useEffect(() => {
     loadProduct()
-  }, [id])
+  }, [id, user?.brandId])
 
   const updateStage = async (newStage) => {
     const { error } = await supabase.from('products').update({ stage: newStage }).eq('id', id)
@@ -89,7 +97,6 @@ export default function ProductDetail() {
 
   return (
     <div className="space-y-4">
-      {/* Top Breadcrumb */}
       <div>
         <Link to="/orders" className="text-brand-500 hover:text-brand-400 text-sm font-semibold flex items-center gap-1">
           ← Back to Orders
@@ -116,11 +123,17 @@ export default function ProductDetail() {
                 {product.po_number && <span> · PO: <strong className="text-gray-300 font-mono">{product.po_number}</strong></span>}
                 {product.style_code && <span> · Style: <strong className="text-gray-300">{product.style_code}</strong></span>}
               </p>
-              <div className="flex items-center gap-2 mt-1">
+              
+              <div className="flex flex-wrap items-center gap-2 mt-1">
                 <span className="text-xs font-semibold text-brand-400">Total qty: {totalQty}</span>
                 {totalShipped > 0 && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/60 text-emerald-400 font-semibold">
                     🚚 {totalShipped}/{totalQty} shipped
+                  </span>
+                )}
+                {showFinancials && product.price_per_piece && (
+                  <span className="text-xs text-gray-300 font-medium">
+                    · ₹{Number(product.price_per_piece).toLocaleString('en-IN')}/pc
                   </span>
                 )}
               </div>
@@ -136,17 +149,33 @@ export default function ProductDetail() {
                 Edit
               </button>
             )}
-            <button
-              onClick={() => setShowShipmentModal(true)}
-              className="bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-800/70 text-emerald-300 rounded-xl px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5"
-            >
-              <span>🚚</span> Dispatches
-            </button>
+            
+            {/* Dispatch management available to internal staff & viewable by clients */}
+            {!isClient && (
+              <button
+                onClick={() => setShowShipmentModal(true)}
+                className="bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-800/70 text-emerald-300 rounded-xl px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5"
+              >
+                <span>🚚</span> Dispatches
+              </button>
+            )}
+
+            {product.tech_pack_url && (
+              <a
+                href={product.tech_pack_url}
+                target="_blank"
+                rel="noreferrer"
+                className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-brand-400 rounded-xl px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5"
+              >
+                <span>📄</span> Tech Pack
+              </a>
+            )}
+
             <button
               onClick={handleExportPDF}
               className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 rounded-xl px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5"
             >
-              <span>📄</span> Export PDF
+              <span>📄</span> Export Job Sheet
             </button>
           </div>
         </div>
@@ -155,7 +184,7 @@ export default function ProductDetail() {
         <div className="mt-4 pt-3.5 border-t border-gray-800 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs">
             <span className="text-gray-400">Stage:</span>
-            {canEdit ? (
+            {!isClient && canEdit ? (
               <select
                 value={product.stage || 'cutting'}
                 onChange={(e) => updateStage(e.target.value)}
@@ -168,21 +197,22 @@ export default function ProductDetail() {
                 ))}
               </select>
             ) : (
-              <span className={`px-2 py-0.5 rounded-full text-xs ${stageInfo(product.stage).color}`}>
+              <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${stageInfo(product.stage).color}`}>
                 {stageInfo(product.stage).label}
               </span>
             )}
           </div>
 
-          <button
-            onClick={() => setShowQR(true)}
-            className="bg-gray-950 hover:bg-gray-800 border border-gray-800 text-gray-300 rounded-lg px-2.5 py-1 text-xs font-medium flex items-center gap-1.5"
-          >
-            <span>📱</span> Show QR Code for Quick Logging
-          </button>
+          {!isClient && (
+            <button
+              onClick={() => setShowQR(true)}
+              className="bg-gray-950 hover:bg-gray-800 border border-gray-800 text-gray-300 rounded-lg px-2.5 py-1 text-xs font-medium flex items-center gap-1.5"
+            >
+              <span>📱</span> Quick QR Login
+            </button>
+          )}
         </div>
 
-        {/* Planned Operations Summary */}
         {product.planned_work?.length > 0 && (
           <div className="mt-3 bg-gray-950/60 border border-gray-800/80 rounded-xl p-2.5 text-xs">
             <span className="text-gray-500 uppercase tracking-wider text-[10px] font-bold mr-2">Planned Work:</span>
@@ -197,7 +227,7 @@ export default function ProductDetail() {
         )}
       </div>
 
-      {/* Navigation Tabs */}
+      {/* Tabs */}
       <div className="flex border-b border-gray-800 text-sm gap-2">
         <button
           onClick={() => setActiveTab('sizes')}
@@ -215,38 +245,39 @@ export default function ProductDetail() {
         >
           Photos ({photos.length})
         </button>
-        <button
-          onClick={() => setActiveTab('work')}
-          className={`pb-2 px-3 font-semibold transition ${
-            activeTab === 'work' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-gray-400 hover:text-gray-200'
-          }`}
-        >
-          Work History ({logs.length})
-        </button>
+
+        {/* Tailor work logs are internal only */}
+        {!isClient && (
+          <button
+            onClick={() => setActiveTab('work')}
+            className={`pb-2 px-3 font-semibold transition ${
+              activeTab === 'work' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            Work History ({logs.length})
+          </button>
+        )}
       </div>
 
-      {/* TAB 1: SIZES & QUANTITIES */}
       {activeTab === 'sizes' && (
         <SizesTab
           productId={product.id}
           sizes={sizes}
-          canEdit={canEdit}
+          canEdit={!isClient && canEdit}
           onReload={loadProduct}
         />
       )}
 
-      {/* TAB 2: PHOTOS */}
       {activeTab === 'photos' && (
         <PhotosTab
           productId={product.id}
           photos={photos}
-          canEdit={canEdit}
+          canEdit={!isClient && canEdit}
           onReload={loadProduct}
         />
       )}
 
-      {/* TAB 3: WORK HISTORY */}
-      {activeTab === 'work' && (
+      {!isClient && activeTab === 'work' && (
         <WorkLogsTab
           productId={product.id}
           logs={logs}
@@ -256,7 +287,6 @@ export default function ProductDetail() {
         />
       )}
 
-      {/* MODAL: DISPATCHES & PARTIAL DELIVERIES */}
       {showShipmentModal && (
         <ShipmentModal
           product={product}
@@ -266,7 +296,6 @@ export default function ProductDetail() {
         />
       )}
 
-      {/* MODAL: QR CODE FOR FLOOR SCANNING */}
       {showQR && (
         <Modal onClose={() => setShowQR(false)}>
           <div className="text-center p-2">
@@ -276,13 +305,12 @@ export default function ProductDetail() {
               <img src={qrUrl} alt="Garment Log QR" className="w-full h-full" />
             </div>
             <p className="text-xs text-gray-400 mt-4">
-              Scan with any mobile phone camera to open this garment, update stages, or record worker logs directly.
+              Scan with phone camera to update stages or record piece-rate tailor logs.
             </p>
           </div>
         </Modal>
       )}
 
-      {/* MODAL: LOG WORK ENTRY */}
       {showLogWork && (
         <LogWorkModal
           productId={product.id}
@@ -295,7 +323,6 @@ export default function ProductDetail() {
         />
       )}
 
-      {/* MODAL: EDIT PRODUCT DETAILS */}
       {showEdit && (
         <EditProductModal
           product={product}
@@ -315,9 +342,6 @@ export default function ProductDetail() {
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SUB-COMPONENT: SIZES TAB
-// ─────────────────────────────────────────────────────────────────────────────
 function SizesTab({ productId, sizes, canEdit, onReload }) {
   const [sizeList, setSizeList] = useState(sizes)
   const [newLabel, setNewLabel] = useState('')
@@ -377,7 +401,9 @@ function SizesTab({ productId, sizes, canEdit, onReload }) {
                   setSizeList((prev) => prev.map((item) => (item.id === s.id ? { ...item, quantity: val } : item)))
                 }}
                 onBlur={(e) => updateQuantity(s.id, e.target.value)}
-                className="w-20 bg-gray-950 border border-gray-700 text-gray-100 rounded-lg px-2.5 py-1 text-right text-sm font-semibold focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className={`w-20 bg-gray-950 border border-gray-700 text-gray-100 rounded-lg px-2.5 py-1 text-right text-sm font-semibold focus:outline-none focus:ring-1 focus:ring-brand-500 ${
+                  !canEdit ? 'cursor-not-allowed text-gray-400' : ''
+                }`}
               />
               <span className="text-xs text-gray-400">pcs</span>
               {canEdit && (
@@ -421,9 +447,6 @@ function SizesTab({ productId, sizes, canEdit, onReload }) {
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SUB-COMPONENT: PHOTOS TAB
-// ─────────────────────────────────────────────────────────────────────────────
 function PhotosTab({ productId, photos, canEdit, onReload }) {
   const [uploading, setUploading] = useState(false)
 
@@ -481,9 +504,6 @@ function PhotosTab({ productId, photos, canEdit, onReload }) {
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SUB-COMPONENT: WORK LOGS TAB
-// ─────────────────────────────────────────────────────────────────────────────
 function WorkLogsTab({ productId, logs, canLog, onOpenLogModal, onReload }) {
   const deleteLog = async (logId) => {
     if (!confirm('Delete this work log entry?')) return
@@ -515,234 +535,4 @@ function WorkLogsTab({ productId, logs, canLog, onOpenLogModal, onReload }) {
                 <span className="font-bold text-gray-200">{l.employees?.name || 'Unknown Tailor'}</span>
                 <span className="bg-gray-800 text-gray-300 px-2 py-0.5 rounded text-[11px]">
                   {WORK_TYPE_LABEL?.[l.work_type] || l.work_type}
-                </span>
-                <span className="font-mono text-brand-400 font-bold">{l.pieces} pcs</span>
-              </div>
-              <p className="text-[11px] text-gray-500 mt-1">
-                {new Date(l.created_at).toLocaleString('en-IN', {
-                  day: '2-digit',
-                  month: 'short',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-                {l.notes && ` · "${l.notes}"`}
-              </p>
-            </div>
-
-            {canLog && (
-              <button onClick={() => deleteLog(l.id)} className="text-gray-500 hover:text-red-400 px-2 text-sm">
-                ✕
-              </button>
-            )}
-          </div>
-        ))}
-        {logs.length === 0 && <p className="text-xs text-gray-500 py-4">No completed work entries logged yet.</p>}
-      </div>
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SUB-COMPONENT: RECORD WORK MODAL
-// ─────────────────────────────────────────────────────────────────────────────
-function LogWorkModal({ productId, employees, onClose, onSaved }) {
-  const [employeeId, setEmployeeId] = useState(employees[0]?.id || '')
-  const [workType, setWorkType] = useState('stitching')
-  const [pieces, setPieces] = useState('')
-  const [notes, setNotes] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  const save = async (e) => {
-    e.preventDefault()
-    if (!pieces || parseInt(pieces, 10) <= 0) return
-    setSaving(true)
-    try {
-      await supabase.from('work_logs').insert({
-        product_id: productId,
-        employee_id: employeeId || null,
-        work_type: workType,
-        pieces: parseInt(pieces, 10),
-        notes: notes.trim() || null,
-      })
-      onSaved()
-    } catch (err) {
-      alert('Could not record work: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Modal onClose={onClose}>
-      <form onSubmit={save} className="space-y-3">
-        <h3 className="text-lg font-bold text-gray-100 mb-2">Record Tailor / Floor Work</h3>
-
-        <div>
-          <label className={labelClass}>Worker / Tailor*</label>
-          <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={inputClass} required>
-            <option value="">Select Employee</option>
-            {employees.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name} ({e.role})
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className={labelClass}>Operation Performed*</label>
-          <select value={workType} onChange={(e) => setWorkType(e.target.value)} className={inputClass}>
-            {WORK_TYPES.map((w) => (
-              <option key={w.key} value={w.key}>
-                {w.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className={labelClass}>Pieces Completed*</label>
-          <input
-            type="number"
-            min="1"
-            value={pieces}
-            onChange={(e) => setPieces(e.target.value)}
-            className={inputClass}
-            placeholder="e.g. 25"
-            required
-          />
-        </div>
-
-        <div>
-          <label className={labelClass}>Notes (optional)</label>
-          <input
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className={inputClass}
-            placeholder="e.g. Front pockets completed"
-          />
-        </div>
-
-        <FormActions onCancel={onClose} saving={saving} />
-      </form>
-    </Modal>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SUB-COMPONENT: EDIT PRODUCT MODAL
-// ─────────────────────────────────────────────────────────────────────────────
-function EditProductModal({ product, brands, onClose, onSaved, onDeleted }) {
-  const [name, setName] = useState(product.name || '')
-  const [styleCode, setStyleCode] = useState(product.style_code || '')
-  const [poNumber, setPoNumber] = useState(product.po_number || '')
-  const [brandId, setBrandId] = useState(product.brand_id || '')
-  const [status, setStatus] = useState(product.status || 'in_production')
-  const [stage, setStage] = useState(product.stage || 'cutting')
-  const [pricePerPiece, setPricePerPiece] = useState(product.price_per_piece != null ? String(product.price_per_piece) : '')
-  const [gstRate, setGstRate] = useState(product.gst_rate != null ? Number(product.gst_rate) : 5)
-  const [file, setFile] = useState(null)
-  const [saving, setSaving] = useState(false)
-
-  const save = async (e) => {
-    e.preventDefault()
-    if (!name.trim()) return
-    setSaving(true)
-    try {
-      let cover_photo_url = product.cover_photo_url
-      if (file) {
-        cover_photo_url = await uploadPhoto(file, 'products')
-      }
-
-      await supabase
-        .from('products')
-        .update({
-          name: name.trim(),
-          style_code: styleCode.trim() || null,
-          po_number: poNumber.trim() || null,
-          brand_id: brandId || null,
-          status,
-          stage,
-          price_per_piece: pricePerPiece ? Number(pricePerPiece) : null,
-          gst_rate: Number(gstRate),
-          cover_photo_url,
-        })
-        .eq('id', product.id)
-
-      onSaved()
-    } catch (err) {
-      alert('Error updating order: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const remove = async () => {
-    if (!confirm(`Delete "${product.name}"? This permanently removes all logs, sizes, and dispatches.`)) return
-    setSaving(true)
-    try {
-      await supabase.from('products').delete().eq('id', product.id)
-      onDeleted()
-    } catch (err) {
-      alert('Could not delete: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Modal onClose={onClose}>
-      <form onSubmit={save} className="space-y-3">
-        <h3 className="text-lg font-bold text-gray-100">Edit Order Details</h3>
-
-        <label className={labelClass}>Garment Name*</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} className={inputClass} required />
-
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className={labelClass}>PO Number</label>
-            <input value={poNumber} onChange={(e) => setPoNumber(e.target.value)} className={inputClass} />
-          </div>
-          <div>
-            <label className={labelClass}>Style Code</label>
-            <input value={styleCode} onChange={(e) => setStyleCode(e.target.value)} className={inputClass} />
-          </div>
-        </div>
-
-        <label className={labelClass}>Brand</label>
-        <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className={inputClass}>
-          <option value="">No brand</option>
-          {brands.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
-        </select>
-
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className={labelClass}>Price / pc (₹)</label>
-            <input
-              value={pricePerPiece}
-              onChange={(e) => setPricePerPiece(e.target.value.replace(/[^0-9.]/g, ''))}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>GST Slab</label>
-            <select value={gstRate} onChange={(e) => setGstRate(Number(e.target.value))} className={inputClass}>
-              <option value={0}>0%</option>
-              <option value={5}>5%</option>
-              <option value={18}>18%</option>
-            </select>
-          </div>
-        </div>
-
-        <label className={labelClass}>Replace Cover Photo</label>
-        <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files[0])} className="w-full text-xs text-gray-400 mb-2" />
-
-        <FormActions onCancel={onClose} saving={saving} onDelete={remove} />
-      </form>
-    </Modal>
-  )
-}
+            
