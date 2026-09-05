@@ -22,10 +22,12 @@ const navItems = [
 ]
 
 function Nav({ user }) {
-  const visibleItems = navItems.filter((item) => {
-    if (!item.need) return true
-    return can(user, item.need)
-  })
+  const isClient = String(user?.role || '').toLowerCase() === 'client'
+
+  // Clients only see Orders & Garments; Staff/Admin sees all tabs
+  const visibleItems = isClient
+    ? navItems.filter((item) => item.to === '/orders' || item.to === '/garments')
+    : navItems
 
   return (
     <div className="flex items-center gap-1 overflow-x-auto">
@@ -48,6 +50,7 @@ function Nav({ user }) {
     </div>
   )
 }
+
 
 function MainShell() {
   const { user, logout } = useAuth()
