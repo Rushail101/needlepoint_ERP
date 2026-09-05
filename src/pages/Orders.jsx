@@ -14,7 +14,7 @@ const STATUS_LABEL = {
   on_hold: { text: 'On Hold', color: 'bg-gray-800 text-gray-400' },
 }
 
-function generateConciseBatchSummary(batch) {
+function generateConciseBatchSummary(batch, showFinancials = false) {
   const brand = batch.brands?.name || 'Independent'
   let subtotal = 0
   let totalPieces = 0
@@ -30,8 +30,8 @@ function generateConciseBatchSummary(batch) {
     const lineTotal = it.total_amount != null ? Number(it.total_amount) : (rate * qty)
     subtotal += (rate * qty)
 
-    const rateText = rate > 0 ? ` @ ₹${rate.toLocaleString('en-IN')}/pc` : ''
-    const totalText = lineTotal > 0 ? ` = ₹${lineTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : ''
+    const rateText = (showFinancials && rate > 0) ? ` @ ₹${rate.toLocaleString('en-IN')}/pc` : ''
+    const totalText = (showFinancials && lineTotal > 0) ? ` = ₹${lineTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : ''
 
     let dispatchLine = ''
     if (shippedQty > 0) {
@@ -57,7 +57,7 @@ function generateConciseBatchSummary(batch) {
     totalsBlock += ` (${totalShippedCount} pcs dispatched, ${Math.max(0, totalPieces - totalShippedCount)} pcs pending)`
   }
 
-  if (subtotal > 0) {
+  if (showFinancials && subtotal > 0) {
     totalsBlock += `\n*Subtotal:* ₹${subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
 *GST (${gstRate}%):* ₹${gstAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
 *Grand Total:* ₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
@@ -77,7 +77,9 @@ ${totalsBlock}`
 export default function Orders() {
   const { user } = useAuth()
   const isClient = user?.role === 'client'
-  const canEdit = can(user, 'create_orders')
+  const canCreate = can(user, 'create_orders')
+  const showFinancials = can(user, 'view_financials')
+
   const [rawProducts, setRawProducts] = useState([])
   const [brands, setBrands] = useState([])
   const [loading, setLoading] = useState(true)
@@ -177,7 +179,7 @@ export default function Orders() {
 
   const handleCopySummary = async () => {
     if (!selectedBatch) return
-    const text = generateConciseBatchSummary(selectedBatch)
+    const text = generateConciseBatchSummary(selectedBatch, showFinancials)
     await navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -190,7 +192,7 @@ export default function Orders() {
           <h2 className="text-xl font-bold text-gray-100">Orders</h2>
           {isClient && <p className="text-xs text-brand-400 font-medium">Viewing production runs for {user.name}</p>}
         </div>
-        {canEdit && (
+        {canCreate && (
           <Link
             to="/orders/new"
             className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm"
@@ -234,7 +236,6 @@ export default function Orders() {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
           {filtered.map((item) => {
-            // MULTI-PRODUCT BATCH CARD
             if (item.isBatch) {
               const batchQty = item.items.reduce((acc, p) => {
                 return acc + (p.product_sizes || []).reduce((qAcc, s) => qAcc + (Number(s.quantity) || 0), 0)
@@ -296,7 +297,7 @@ export default function Orders() {
                           </span>
                         )}
                       </div>
-                      {batchGrandTotal > 0 && (
+                      {showFinancials && batchGrandTotal > 0 && (
                         <span className="font-bold text-gray-100">
                           ₹{batchGrandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                         </span>
@@ -307,7 +308,6 @@ export default function Orders() {
               )
             }
 
-            // SINGLE PRODUCT CARD
             const p = item
             const totalQty = (p.product_sizes || []).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
             const totalShipped = (p.shipments || []).reduce((sum, s) => sum + (Number(s.quantity) || 0), 0)
@@ -358,7 +358,7 @@ export default function Orders() {
                           </span>
                         )}
                       </div>
-                      {grandTotal > 0 && (
+                      {showFinancials && grandTotal > 0 && (
                         <span className="font-semibold text-brand-400">
                           ₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                         </span>
@@ -443,212 +443,4 @@ export default function Orders() {
                     
                     {prodShipped > 0 ? (
                       <div className="mt-1 flex items-center gap-1.5">
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 border border-emerald-800 text-emerald-300 font-semibold">
-                          🚚 {prodShipped}/{qty} Shipped
-                        </span>
-                        <span className="text-[10px] text-gray-400 truncate">
-                          ({shippedBreakdown})
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="flex gap-1 mt-1">
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${stageInfo(prod.stage).color}`}>
-                          {stageInfo(prod.stage).label}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    {prod.total_amount && (
-                      <p className="text-xs font-bold text-gray-200">
-                        ₹{Number(prod.total_amount).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                      </p>
-                    )}
-                    <span className="text-xs text-brand-400 font-medium">View →</span>
-                  </div>
-                </Link>
-              )
-            })}
-          </div>
-        </Modal>
-      )}
-
-      {/* QUICK EDIT FORM */}
-      {editing && (
-        <OrderQuickEditForm
-          brands={brands}
-          order={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); load() }}
-        />
-      )}
-    </div>
-  )
-}
-
-function OrderQuickEditForm({ brands, order, onClose, onSaved }) {
-  const [name, setName] = useState(order.name || '')
-  const [styleCode, setStyleCode] = useState(order.style_code || '')
-  const [brandId, setBrandId] = useState(order.brand_id || '')
-  const [status, setStatus] = useState(order.status || 'in_production')
-  const [stage, setStage] = useState(order.stage || 'cutting')
-  const [pricePerPiece, setPricePerPiece] = useState(order.price_per_piece != null ? String(order.price_per_piece) : '')
-  const [gstRate, setGstRate] = useState(order.gst_rate != null ? Number(order.gst_rate) : 5)
-  const [file, setFile] = useState(null)
-  const [saving, setSaving] = useState(false)
-
-  const totalQty = (order.product_sizes || []).reduce((sum, s) => sum + (Number(s.quantity) || 0), 0)
-  const hasPricing = Boolean(pricePerPiece && !isNaN(Number(pricePerPiece)) && totalQty > 0)
-  const subtotal = hasPricing ? Number(pricePerPiece) * totalQty : 0
-  const gstAmount = hasPricing ? (subtotal * Number(gstRate)) / 100 : 0
-  const finalTotal = hasPricing ? Math.round(subtotal + gstAmount) : null
-
-  const save = async (e) => {
-    e.preventDefault()
-    if (!name.trim()) return
-    setSaving(true)
-    try {
-      let cover_photo_url = order.cover_photo_url || null
-      if (file) cover_photo_url = await uploadPhoto(file, 'products')
-      await supabase.from('products').update({
-        name: name.trim(),
-        style_code: styleCode.trim() || null,
-        brand_id: brandId || null,
-        status,
-        stage,
-        price_per_piece: pricePerPiece ? Number(pricePerPiece) : null,
-        gst_rate: Number(gstRate),
-        total_amount: finalTotal,
-        cover_photo_url,
-      }).eq('id', order.id)
-      onSaved()
-    } catch (err) {
-      alert('Could not save: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const remove = async () => {
-    if (!confirm(`Delete "${order.name}"? This removes all associated data.`)) return
-    setSaving(true)
-    try {
-      await supabase.from('products').delete().eq('id', order.id)
-      onSaved()
-    } catch (err) {
-      alert('Could not delete: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Modal onClose={onClose}>
-      <form onSubmit={save}>
-        <h3 className="text-lg font-bold mb-4 text-gray-100">Edit Order</h3>
-
-        {order.cover_photo_url && !file && (
-          <div className="w-full h-36 rounded-lg overflow-hidden border border-gray-800 mb-2 flex items-center justify-center bg-gray-900">
-            <img src={order.cover_photo_url} className="w-full h-full object-cover" />
-          </div>
-        )}
-        <label className={labelClass}>Photo</label>
-        <input type="file" accept="image/*"
-          onChange={(e) => setFile(e.target.files[0])}
-          className="w-full mb-3 text-sm text-gray-300" />
-
-        <label className={labelClass}>Garment name*</label>
-        <input value={name} onChange={(e) => setName(e.target.value)}
-          className={inputClass} placeholder="e.g. Oversized Hoodie" required />
-
-        <label className={labelClass}>Style code</label>
-        <input value={styleCode} onChange={(e) => setStyleCode(e.target.value)}
-          className={inputClass} placeholder="optional" />
-
-        <label className={labelClass}>Brand</label>
-        <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className={inputClass}>
-          <option value="">No brand</option>
-          {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
-
-        <label className={labelClass}>Status</label>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass}>
-          <option value="in_production">In Production</option>
-          <option value="sampling">Sampling</option>
-          <option value="completed">Completed</option>
-          <option value="on_hold">On Hold</option>
-        </select>
-
-        <label className={labelClass}>Production stage</label>
-        <select value={stage} onChange={(e) => setStage(e.target.value)} className={inputClass}>
-          {STAGES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-        </select>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-          <div>
-            <label className={labelClass}>Price per piece (₹)</label>
-            <input
-              value={pricePerPiece}
-              onChange={(e) => setPricePerPiece(e.target.value.replace(/[^0-9.]/g, ''))}
-              inputMode="decimal"
-              className={inputClass}
-              placeholder="Rate before GST"
-            />
-          </div>
-          <div>
-            <label className={labelClass}>GST Slab</label>
-            <div className="flex gap-2">
-              {[
-                { label: '0%', value: 0 },
-                { label: '5%', value: 5 },
-                { label: '18%', value: 18 },
-              ].map(slab => (
-                <button
-                  key={slab.value}
-                  type="button"
-                  onClick={() => setGstRate(slab.value)}
-                  className={`flex-1 py-2 rounded-lg text-xs font-semibold border transition ${
-                    gstRate === slab.value
-                      ? 'bg-brand-600 border-brand-600 text-white'
-                      : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600'
-                  }`}
-                >
-                  {slab.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {totalQty > 0 && (
-          <div className="bg-gray-950/60 border border-gray-800 rounded-xl p-3 mb-4 space-y-1.5 text-xs">
-            <div className="flex justify-between text-gray-400">
-              <span>Total Quantity:</span>
-              <span className="font-medium text-gray-200">{totalQty} pcs</span>
-            </div>
-            {hasPricing && (
-              <>
-                <div className="flex justify-between text-gray-400">
-                  <span>Subtotal (Taxable):</span>
-                  <span>₹{subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex justify-between text-gray-400">
-                  <span>GST ({gstRate}%):</span>
-                  <span>₹{gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div className="border-t border-gray-800 pt-1.5 mt-1 flex justify-between font-bold text-sm text-gray-100">
-                  <span>Grand Total:</span>
-                  <span className="text-brand-400">
-                    ₹{finalTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        <FormActions onCancel={onClose} saving={saving} onDelete={remove} />
-      </form>
-    </Modal>
-  )
-}
+                        <span className="t
