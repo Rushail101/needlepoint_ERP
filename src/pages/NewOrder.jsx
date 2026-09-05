@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
-import { WORK_TYPES } from '../workTypes.js'
 import { inputClass, labelClass } from '../components/Modal.jsx'
 import { useAuth } from '../components/PinGate.jsx'
 
@@ -27,6 +26,8 @@ export default function NewOrder() {
       styleCode: '',
       coverPhotoUrl: null,
       file: null,
+      pdfFile: null,
+      techPackUrl: null,
       saveToCatalog: false,
       pricePerPiece: '',
       gstRate: 5,
@@ -49,7 +50,7 @@ export default function NewOrder() {
       setSavedGarments(gList || [])
     }
     loadPrerequisites()
-  }, [user?.brandId])
+  }, [isClient, user?.brandId])
 
   const pickGarment = (idx, gId) => {
     const g = savedGarments.find((x) => x.id === gId)
@@ -64,6 +65,8 @@ export default function NewOrder() {
             styleCode: '',
             coverPhotoUrl: null,
             file: null,
+            pdfFile: null,
+            techPackUrl: null,
             pricePerPiece: '',
           }
         }
@@ -73,7 +76,9 @@ export default function NewOrder() {
           name: g.name,
           styleCode: g.style_code || '',
           coverPhotoUrl: g.cover_photo_url || null,
+          techPackUrl: g.tech_pack_url || null,
           file: null,
+          pdfFile: null,
           pricePerPiece: g.default_price_per_piece != null ? String(g.default_price_per_piece) : it.pricePerPiece,
         }
       })
@@ -90,6 +95,8 @@ export default function NewOrder() {
         styleCode: '',
         coverPhotoUrl: null,
         file: null,
+        pdfFile: null,
+        techPackUrl: null,
         saveToCatalog: false,
         pricePerPiece: '',
         gstRate: 5,
@@ -124,6 +131,11 @@ export default function NewOrder() {
           finalPhoto = await uploadPhoto(it.file, 'products')
         }
 
+        let finalPdfUrl = it.techPackUrl
+        if (it.pdfFile) {
+          finalPdfUrl = await uploadPhoto(it.pdfFile, 'garments')
+        }
+
         let garmentId = it.pickedGarmentId || null
         if (!garmentId && it.saveToCatalog) {
           const { data: newG, error: gErr } = await supabase
@@ -133,7 +145,8 @@ export default function NewOrder() {
               style_code: it.styleCode.trim() || null,
               brand_id: finalBrandId,
               cover_photo_url: finalPhoto,
-              default_price_per_piece: it.pricePerPiece ? Number(it.pricePerPiece) : null,
+              tech_pack_url: finalPdfUrl,
+              default_price_per_piece: !isClient && it.pricePerPiece ? Number(it.pricePerPiece) : null,
             })
             .select()
             .single()
@@ -155,10 +168,11 @@ export default function NewOrder() {
             style_code: it.styleCode.trim() || null,
             brand_id: finalBrandId,
             po_number: cleanPo || null,
-            status,
+            status: isClient ? 'in_production' : status,
             stage: 'cutting',
             planned_work: it.plannedWork,
             cover_photo_url: finalPhoto,
+            tech_pack_url: finalPdfUrl,
             garment_id: garmentId,
             price_per_piece: rate,
             gst_rate: slab,
@@ -200,7 +214,7 @@ export default function NewOrder() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Run Level Meta */}
+        {/* Run-Level Header Information */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className={labelClass}>Client Brand*</label>
@@ -208,13 +222,14 @@ export default function NewOrder() {
               <input
                 disabled
                 value={user.name}
-                className="w-full bg-gray-950 border border-gray-800 text-gray-400 rounded-xl px-3 py-2 text-sm font-semibold"
+                className="w-full bg-gray-950 border border-gray-800 text-gray-400 rounded-xl px-3 py-2 text-sm font-semibold cursor-not-allowed"
               />
             ) : (
               <select
                 value={brandId}
                 onChange={(e) => setBrandId(e.target.value)}
                 className={inputClass}
+                required
               >
                 <option value="">Select Brand</option>
                 {brands.map((b) => (
@@ -236,23 +251,25 @@ export default function NewOrder() {
             />
           </div>
 
-          <div>
-            <label className={labelClass}>Order State</label>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass}>
-              <option value="in_production">In Production</option>
-              <option value="sampling">Sampling</option>
-              <option value="on_hold">On Hold</option>
-            </select>
-          </div>
+          {!isClient && (
+            <div>
+              <label className={labelClass}>Order State</label>
+              <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass}>
+                <option value="in_production">In Production</option>
+                <option value="sampling">Sampling</option>
+                <option value="on_hold">On Hold</option>
+              </select>
+            </div>
+          )}
         </div>
 
-        {/* Garment Items in this PO */}
+        {/* Garment Items in this Run */}
         <div className="space-y-4">
           {items.map((it, idx) => (
             <div key={it.id} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 sm:p-5 relative space-y-3">
               <div className="flex items-center justify-between border-b border-gray-800 pb-2">
                 <span className="text-xs uppercase font-bold text-brand-400 tracking-wider">
-                  Style #{idx + 1}
+                  Garment #{idx + 1}
                 </span>
                 {items.length > 1 && (
                   <button
@@ -305,64 +322,104 @@ export default function NewOrder() {
                       const v = e.target.value
                       setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, styleCode: v } : x)))
                     }}
-                    placeholder="e.g. CAYA-BOX-01"
+                    placeholder="e.g. NP-BOX-01"
                     className={inputClass}
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className={labelClass}>Price per piece (₹)</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={it.pricePerPiece}
-                    onChange={(e) => {
-                      const v = e.target.value.replace(/[^0-9.]/g, '')
-                      setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, pricePerPiece: v } : x)))
-                    }}
-                    placeholder="Rate before GST"
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>GST Slab</label>
-                  <select
-                    value={it.gstRate}
-                    onChange={(e) => {
-                      const v = Number(e.target.value)
-                      setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, gstRate: v } : x)))
-                    }}
-                    className={inputClass}
-                  >
-                    <option value={0}>0%</option>
-                    <option value={5}>5%</option>
-                    <option value={18}>18%</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Photo Input */}
-              <div>
-                <label className={labelClass}>Cover Photo</label>
-                {it.coverPhotoUrl && !it.file && (
-                  <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-800 mb-2">
-                    <img src={it.coverPhotoUrl} alt="" className="w-full h-full object-cover" />
+              {/* Price handling: Editable for staff, read-only tag for client */}
+              {!isClient ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelClass}>Price per piece (₹)</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={it.pricePerPiece}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^0-9.]/g, '')
+                        setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, pricePerPiece: v } : x)))
+                      }}
+                      placeholder="Rate before GST"
+                      className={inputClass}
+                    />
                   </div>
-                )}
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => {
-                    const f = e.target.files[0]
-                    setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, file: f } : x)))
-                  }}
-                  className="w-full text-xs text-gray-400"
-                />
+                  <div>
+                    <label className={labelClass}>GST Slab</label>
+                    <select
+                      value={it.gstRate}
+                      onChange={(e) => {
+                        const v = Number(e.target.value)
+                        setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, gstRate: v } : x)))
+                      }}
+                      className={inputClass}
+                    >
+                      <option value={0}>0%</option>
+                      <option value={5}>5%</option>
+                      <option value={18}>18%</option>
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                it.pricePerPiece && (
+                  <div className="bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-xs flex justify-between items-center">
+                    <span className="text-gray-400">Agreed Unit Rate:</span>
+                    <span className="font-bold text-brand-400">
+                      ₹{Number(it.pricePerPiece).toLocaleString('en-IN')} / pc
+                    </span>
+                  </div>
+                )
+              )}
+
+              {/* Photos & Mockup PDF Uploads */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className={labelClass}>Cover Photo</label>
+                  {it.coverPhotoUrl && !it.file && (
+                    <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-800 mb-2">
+                      <img src={it.coverPhotoUrl} alt="" className="w-full h-full object-cover" />
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const f = e.target.files[0]
+                      setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, file: f } : x)))
+                    }}
+                    className="w-full text-xs text-gray-400"
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>Tech Pack / Mockup (PDF)</label>
+                  {it.techPackUrl && !it.pdfFile && (
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs text-gray-300">📄 PDF attached</span>
+                      <a
+                        href={it.techPackUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-brand-400 text-xs font-semibold hover:underline"
+                      >
+                        View
+                      </a>
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    onChange={(e) => {
+                      const f = e.target.files[0]
+                      setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, pdfFile: f } : x)))
+                    }}
+                    className="w-full text-xs text-gray-400"
+                  />
+                </div>
               </div>
 
-              {/* Sizes Grid */}
+              {/* Sizes & Quantities Matrix */}
               <div>
                 <label className={labelClass}>Sizes & Quantities</label>
                 <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
