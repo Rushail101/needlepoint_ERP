@@ -1,22 +1,20 @@
-import { Routes, Route, Navigate, NavLink } from 'react-router-dom'
+import { Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import PinGate, { useAuth } from './components/PinGate.jsx'
-// OR if using named import:
-// import { PinGate, useAuth } from './components/PinGate.jsx'
-import Orders from './pages/Orders.jsx'
 import { can } from './permissions.js'
-import ProductDetail from './pages/ProductDetail.jsx'
+
+import Orders from './pages/Orders.jsx'
 import NewOrder from './pages/NewOrder.jsx'
+import ProductDetail from './pages/ProductDetail.jsx'
 import GarmentCatalog from './pages/GarmentCatalog.jsx'
 import Brands from './pages/Brands.jsx'
 import Employees from './pages/Employees.jsx'
 import EmployeeSummary from './pages/EmployeeSummary.jsx'
 import WorkLog from './pages/WorkLog.jsx'
 import Access from './pages/Access.jsx'
-import { can } from './permissions.js'
 
 const navItems = [
-  { to: '/', label: 'Orders', icon: '📦' }, // everyone can view orders
-  { to: '/garments', label: 'Garments', icon: '👕' }, // everyone can view the catalog
+  { to: '/orders', label: 'Orders', icon: '📦' },
+  { to: '/garments', label: 'Garments', icon: '👕' },
   { to: '/brands', label: 'Brands', icon: '🏷️', need: 'view_brands' },
   { to: '/employees', label: 'Team', icon: '👥', need: 'view_team' },
   { to: '/worklog', label: 'Work Log', icon: '📋', need: 'manage_work_logs' },
@@ -36,9 +34,9 @@ function Nav({ user }) {
           key={item.to}
           to={item.to}
           className={({ isActive }) =>
-            `flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+            `flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition ${
               isActive
-                ? 'bg-brand-600 text-white'
+                ? 'bg-brand-600 text-white shadow'
                 : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/60'
             }`
           }
@@ -51,38 +49,59 @@ function Nav({ user }) {
   )
 }
 
-// Wraps a route so visiting the URL directly (not just hiding the nav tab) is also blocked.
-function Guard({ need, children }) {
-  const { user } = useAuth()
-  if (need && !can(user, need)) return <Navigate to="/" replace />
-  return children
-}
-
-function Shell() {
+function MainShell() {
   const { user, logout } = useAuth()
+  const isClient = String(user?.role).toLowerCase() === 'client'
+
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 pb-20 sm:pb-0">
-      <header className="bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center justify-between">
-        <h1 className="text-lg font-bold text-brand-500">Needle Point</h1>
-        {user?.name && (
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-400">{user.name}</span>
-            <button onClick={logout} className="text-xs text-gray-500 underline">Logout</button>
+    <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col">
+      <header className="border-b border-gray-800 bg-gray-900/80 backdrop-blur sticky top-0 z-40 px-4 py-2.5">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <span className="font-black text-brand-500 text-base tracking-tight">Needle Point</span>
+            {isClient && (
+              <span className="text-[10px] bg-brand-950 text-brand-300 border border-brand-800 px-2 py-0.5 rounded-full font-semibold">
+                Client Portal · {user.name}
+              </span>
+            )}
           </div>
-        )}
+
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-400">{user?.name || 'User'}</span>
+            <button
+              onClick={logout}
+              className="text-xs text-gray-400 hover:text-red-400 underline transition"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+
+        <div className="max-w-7xl mx-auto pt-2 pb-0.5">
+          <Nav user={user} />
+        </div>
       </header>
-      <Nav user={user} />
-      <main className="max-w-5xl mx-auto p-4">
+
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6">
         <Routes>
-          <Route path="/" element={<Orders />} />
-          <Route path="/orders/new" element={<Guard need="edit_garments"><NewOrder /></Guard>} />
+          <Route path="/" element={<Navigate to="/orders" replace />} />
+          <Route path="/orders" element={<Orders />} />
+          <Route path="/orders/new" element={<NewOrder />} />
           <Route path="/products/:id" element={<ProductDetail />} />
           <Route path="/garments" element={<GarmentCatalog />} />
-          <Route path="/brands" element={<Guard need="view_brands"><Brands /></Guard>} />
-          <Route path="/employees" element={<Guard need="view_team"><Employees /></Guard>} />
-          <Route path="/employees/:id" element={<Guard need="view_team"><EmployeeSummary /></Guard>} />
-          <Route path="/worklog" element={<Guard need="manage_work_logs"><WorkLog /></Guard>} />
-          <Route path="/access" element={<Guard need="view_access"><Access /></Guard>} />
+
+          {/* Admin & Manager Only Routes */}
+          {!isClient && (
+            <>
+              <Route path="/brands" element={<Brands />} />
+              <Route path="/employees" element={<Employees />} />
+              <Route path="/employees/:id" element={<EmployeeSummary />} />
+              <Route path="/worklog" element={<WorkLog />} />
+              <Route path="/access" element={<Access />} />
+            </>
+          )}
+
+          <Route path="*" element={<Navigate to="/orders" replace />} />
         </Routes>
       </main>
     </div>
@@ -92,7 +111,7 @@ function Shell() {
 export default function App() {
   return (
     <PinGate>
-      <Shell />
+      <MainShell />
     </PinGate>
   )
 }
