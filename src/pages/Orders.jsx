@@ -14,15 +14,18 @@ const STATUS_LABEL = {
   on_hold: { text: 'On Hold', color: 'bg-gray-800 text-gray-400' },
 }
 
-// Clean concise summary (no sizes)
 function generateConciseBatchSummary(batch) {
   const brand = batch.brands?.name || 'Independent'
   let subtotal = 0
   let totalPieces = 0
+  let totalShippedCount = 0
 
   const lines = batch.items.map((it, idx) => {
     const qty = (it.product_sizes || []).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
+    const shippedQty = (it.shipments || []).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
     totalPieces += qty
+    totalShippedCount += shippedQty
+
     const rate = Number(it.price_per_piece || 0)
     const lineTotal = it.total_amount != null ? Number(it.total_amount) : (rate * qty)
     subtotal += (rate * qty)
@@ -30,7 +33,18 @@ function generateConciseBatchSummary(batch) {
     const rateText = rate > 0 ? ` @ ₹${rate.toLocaleString('en-IN')}/pc` : ''
     const totalText = lineTotal > 0 ? ` = ₹${lineTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : ''
 
-    return `${idx + 1}. *${it.name}* — ${qty} pcs${rateText}${totalText}`
+    let dispatchLine = ''
+    if (shippedQty > 0) {
+      const sizeBreakdown = (it.shipments || []).reduce((acc, s) => {
+        const key = s.size_label || 'Mixed'
+        acc[key] = (acc[key] || 0) + Number(s.quantity)
+        return acc
+      }, {})
+      const sizeStr = Object.entries(sizeBreakdown).map(([sz, count]) => `${sz}: ${count}`).join(', ')
+      dispatchLine = `\n   ↳ Dispatched: ${shippedQty} pcs (${sizeStr}) | Pending: ${Math.max(0, qty - shippedQty)} pcs`
+    }
+
+    return `${idx + 1}. *${it.name}* — ${qty} pcs${rateText}${totalText}${dispatchLine}`
   }).join('\n')
 
   const sampleItem = batch.items[0]
@@ -39,6 +53,10 @@ function generateConciseBatchSummary(batch) {
   const grandTotal = subtotal > 0 ? Math.round(subtotal + gstAmount) : 0
 
   let totalsBlock = `*Total Volume:* ${totalPieces} pcs`
+  if (totalShippedCount > 0) {
+    totalsBlock += ` (${totalShippedCount} pcs dispatched, ${Math.max(0, totalPieces - totalShippedCount)} pcs pending)`
+  }
+
   if (subtotal > 0) {
     totalsBlock += `\n*Subtotal:* ₹${subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
 *GST (${gstRate}%):* ₹${gstAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
@@ -72,7 +90,7 @@ export default function Orders() {
     setLoading(true)
     const { data: prods } = await supabase
       .from('products')
-      .select('*, brands(name), product_sizes(quantity)')
+      .select('*, brands(name), product_sizes(size_label, quantity), shipments(size_label, quantity, dispatched_at)')
       .order('created_at', { ascending: false })
     const { data: brs } = await supabase.from('brands').select('*').order('name')
     setRawProducts(prods || [])
@@ -82,7 +100,6 @@ export default function Orders() {
 
   useEffect(() => { load() }, [])
 
-  // Group products sharing po_number
   const groupedOrders = (() => {
     const groups = []
     const poMap = new Map()
@@ -117,7 +134,6 @@ export default function Orders() {
     })
   })()
 
-  // Filter & push completed orders down
   const filtered = groupedOrders
     .filter(g => (filterBrand ? g.brand_id === filterBrand : true))
     .filter(g => {
@@ -214,6 +230,10 @@ export default function Orders() {
                 return acc + (p.product_sizes || []).reduce((qAcc, s) => qAcc + (Number(s.quantity) || 0), 0)
               }, 0)
 
+              const batchShipped = item.items.reduce((acc, p) => {
+                return acc + (p.shipments || []).reduce((sAcc, s) => sAcc + (Number(s.quantity) || 0), 0)
+              }, 0)
+
               const batchGrandTotal = item.items.reduce((acc, p) => {
                 if (p.total_amount != null) return acc + Number(p.total_amount)
                 const pQty = (p.product_sizes || []).reduce((qAcc, s) => qAcc + (Number(s.quantity) || 0), 0)
@@ -258,7 +278,14 @@ export default function Orders() {
                     </div>
 
                     <div className="mt-2 pt-1.5 border-t border-gray-800 flex items-center justify-between text-xs">
-                      <span className="text-gray-400">{batchQty} pcs</span>
+                      <div>
+                        <span className="text-gray-400">{batchQty} pcs</span>
+                        {batchShipped > 0 && (
+                          <span className="ml-1 text-[10px] px-1 py-0.2 rounded bg-emerald-950/80 border border-emerald-800/60 text-emerald-400 font-medium">
+                            🚚 {batchShipped}
+                          </span>
+                        )}
+                      </div>
                       {batchGrandTotal > 0 && (
                         <span className="font-bold text-gray-100">
                           ₹{batchGrandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
@@ -273,6 +300,7 @@ export default function Orders() {
             // SINGLE PRODUCT CARD
             const p = item
             const totalQty = (p.product_sizes || []).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
+            const totalShipped = (p.shipments || []).reduce((sum, s) => sum + (Number(s.quantity) || 0), 0)
             const subtotal = p.price_per_piece && totalQty > 0 ? Number(p.price_per_piece) * totalQty : 0
             const gstRate = p.gst_rate ?? 5
             const calculatedTotal = subtotal > 0 ? Math.round(subtotal + (subtotal * gstRate) / 100) : 0
@@ -311,14 +339,21 @@ export default function Orders() {
                       </span>
                     </div>
 
-                    {grandTotal > 0 && (
-                      <div className="mt-2 pt-1.5 border-t border-gray-800 flex items-center justify-between text-xs">
+                    <div className="mt-2 pt-1.5 border-t border-gray-800 flex items-center justify-between text-xs">
+                      <div>
                         <span className="text-gray-400">{totalQty} pcs</span>
+                        {totalShipped > 0 && (
+                          <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/60 text-emerald-400 font-medium">
+                            🚚 {totalShipped}
+                          </span>
+                        )}
+                      </div>
+                      {grandTotal > 0 && (
                         <span className="font-semibold text-brand-400">
                           ₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                         </span>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </Link>
               </div>
@@ -340,7 +375,6 @@ export default function Orders() {
             <p className="text-xs text-gray-400 mt-0.5">{selectedBatch.brands?.name || 'Independent'}</p>
           </div>
 
-          {/* Action Bar: Copy Summary & Print PDF */}
           <div className="grid grid-cols-2 gap-2 mb-4">
             <button
               type="button"
@@ -366,6 +400,18 @@ export default function Orders() {
           <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
             {selectedBatch.items.map((prod) => {
               const qty = (prod.product_sizes || []).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
+              const prodShipped = (prod.shipments || []).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
+
+              const shippedSizes = (prod.shipments || []).reduce((acc, s) => {
+                const key = s.size_label || 'Mixed'
+                acc[key] = (acc[key] || 0) + Number(s.quantity)
+                return acc
+              }, {})
+
+              const shippedBreakdown = Object.entries(shippedSizes)
+                .map(([sz, count]) => `${sz}: ${count}`)
+                .join(', ')
+
               return (
                 <Link
                   key={prod.id}
@@ -384,11 +430,23 @@ export default function Orders() {
                     <p className="text-xs text-gray-400">
                       {prod.style_code ? `Style: ${prod.style_code} · ` : ''}{qty} pcs
                     </p>
-                    <div className="flex gap-1 mt-1">
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${stageInfo(prod.stage).color}`}>
-                        {stageInfo(prod.stage).label}
-                      </span>
-                    </div>
+                    
+                    {prodShipped > 0 ? (
+                      <div className="mt-1 flex items-center gap-1.5">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 border border-emerald-800 text-emerald-300 font-semibold">
+                          🚚 {prodShipped}/{qty} Shipped
+                        </span>
+                        <span className="text-[10px] text-gray-400 truncate">
+                          ({shippedBreakdown})
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex gap-1 mt-1">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${stageInfo(prod.stage).color}`}>
+                          {stageInfo(prod.stage).label}
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div className="text-right">
                     {prod.total_amount && (
