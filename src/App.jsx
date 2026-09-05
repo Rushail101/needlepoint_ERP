@@ -12,6 +12,7 @@ import Employees from './pages/Employees.jsx'
 import EmployeeSummary from './pages/EmployeeSummary.jsx'
 import WorkLog from './pages/WorkLog.jsx'
 import Access from './pages/Access.jsx'
+import { can } from './permissions.js'
 
 const navItems = [
   { to: '/', label: 'Orders', icon: '📦' }, // everyone can view orders
