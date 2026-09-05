@@ -38,53 +38,131 @@ export default function NewOrder() {
 
   useEffect(() => {
     const loadPrerequisites = async () => {
-      let gQuery = supabase.from('garments').select('*').order('name')
-      if (isClient && user?.brandId) {
-        gQuery = gQuery.eq('brand_id', user.brandId)
+      try {
+        // If client, only load their own brand and garments
+        if (isClient && user?.brandId) {
+          setBrandId(user.brandId)
+          const [{ data: b }, { data: gList }] = await Promise.all([
+            supabase.from('brands').select('*').eq('id', user.brandId).maybeSingle(),
+            supabase.from('garments').select('*').eq('brand_id', user.brandId).order('name')
+          ])
+          if (b) setBrands([b])
+          setSavedGarments(gList || [])
+        } else {
+          // Admin / Staff: load all
+          const [{ data: brs }, { data: gList }] = await Promise.all([
+            supabase.from('brands').select('*').order('name'),
+            supabase.from('garments').select('*').order('name')
+          ])
+          setBrands(brs || [])
+          setSavedGarments(gList || [])
+        }
+      } catch (err) {
+        console.error('Failed loading prerequisites:', err)
       }
-      const [{ data: brs }, { data: gList }] = await Promise.all([
-        supabase.from('brands').select('*').order('name'),
-        gQuery,
-      ])
-      setBrands(brs || [])
-      setSavedGarments(gList || [])
     }
     loadPrerequisites()
   }, [isClient, user?.brandId])
 
-  const pickGarment = (idx, gId) => {
-    const g = savedGarments.find((x) => x.id === gId)
-    setItems((prev) =>
-      prev.map((it, i) => {
-        if (i !== idx) return it
-        if (!gId || !g) {
-          return {
-            ...it,
-            pickedGarmentId: '',
-            name: '',
-            styleCode: '',
-            coverPhotoUrl: null,
-            file: null,
-            pdfFile: null,
-            techPackUrl: null,
-            pricePerPiece: '',
-          }
-        }
-        return {
-          ...it,
-          pickedGarmentId: g.id,
-          name: g.name,
-          styleCode: g.style_code || '',
-          coverPhotoUrl: g.cover_photo_url || null,
-          techPackUrl: g.tech_pack_url || null,
-          file: null,
-          pdfFile: null,
-          pricePerPiece: g.default_price_per_piece != null ? String(g.default_price_per_piece) : it.pricePerPiece,
-        }
-      })
-    )
-  }
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    for (const it of items) {
+      if (!it.name.trim()) {
+        alert('Please provide a name for all garments in this order.')
+        return
+      }
+    }
 
+    setSubmitting(true)
+    try {
+      const finalBrandId = isClient ? user.brandId : (brandId || null)
+      const cleanPo = poNumber.trim().toUpperCase() || null
+
+      for (const it of items) {
+        let finalPhoto = it.coverPhotoUrl || null
+        if (it.file) {
+          finalPhoto = await uploadPhoto(it.file, 'products')
+        }
+
+        let finalPdfUrl = it.techPackUrl || null
+        if (it.pdfFile) {
+          finalPdfUrl = await uploadPhoto(it.pdfFile, 'garments')
+        }
+
+        // Strictly convert empty string to null for foreign key
+        let garmentId = it.pickedGarmentId ? it.pickedGarmentId : null
+
+        if (!garmentId && it.saveToCatalog) {
+          const { data: newG, error: gErr } = await supabase
+            .from('garments')
+            .insert({
+              name: it.name.trim(),
+              style_code: it.styleCode.trim() || null,
+              brand_id: finalBrandId,
+              cover_photo_url: finalPhoto,
+              tech_pack_url: finalPdfUrl,
+              default_price_per_piece: !isClient && it.pricePerPiece ? Number(it.pricePerPiece) : null,
+            })
+            .select()
+            .single()
+          if (gErr) throw gErr
+          garmentId = newG.id
+        }
+
+        const validSizes = it.sizes.filter((s) => parseInt(s.quantity, 10) > 0)
+        const totalUnits = validSizes.reduce((sum, s) => sum + parseInt(s.quantity, 10), 0)
+        const rate = it.pricePerPiece ? Number(it.pricePerPiece) : null
+        const sub = rate && totalUnits > 0 ? rate * totalUnits : 0
+        const slab = Number(it.gstRate || 5)
+        const grand = sub > 0 ? Math.round(sub + (sub * slab) / 100) : null
+
+        // Build product payload strictly sanitizing empty fields
+        const productPayload = {
+          name: it.name.trim(),
+          style_code: it.styleCode.trim() || null,
+          brand_id: finalBrandId,
+          po_number: cleanPo,
+          status: isClient ? 'in_production' : status,
+          stage: 'cutting',
+          planned_work: it.plannedWork || ['cutting', 'stitching', 'finishing'],
+          cover_photo_url: finalPhoto,
+          tech_pack_url: finalPdfUrl,
+          garment_id: garmentId, // guaranteed UUID or null
+          price_per_piece: rate,
+          gst_rate: slab,
+          total_amount: grand,
+        }
+
+        const { data: prod, error: pErr } = await supabase
+          .from('products')
+          .insert(productPayload)
+          .select()
+          .single()
+        
+        if (pErr) {
+          console.error('Supabase Product Insert Error:', pErr)
+          throw new Error(pErr.message || 'Error creating product record')
+        }
+
+        if (validSizes.length > 0) {
+          const sizeInserts = validSizes.map((s) => ({
+            product_id: prod.id,
+            size_label: s.size_label.trim().toUpperCase(),
+            quantity: parseInt(s.quantity, 10),
+          }))
+          const { error: sErr } = await supabase.from('product_sizes').insert(sizeInserts)
+          if (sErr) throw sErr
+        }
+      }
+
+      navigate('/orders')
+    } catch (err) {
+      console.error('Submit Error:', err)
+      alert('Could not place order: ' + err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
   const addItem = () => {
     setItems((prev) => [
       ...prev,
