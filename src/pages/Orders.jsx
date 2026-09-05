@@ -76,7 +76,8 @@ ${totalsBlock}`
 
 export default function Orders() {
   const { user } = useAuth()
-  const canEdit = can(user, 'edit_garments')
+  const isClient = user?.role === 'client'
+  const canEdit = can(user, 'create_orders')
   const [rawProducts, setRawProducts] = useState([])
   const [brands, setBrands] = useState([])
   const [loading, setLoading] = useState(true)
@@ -88,17 +89,23 @@ export default function Orders() {
 
   const load = async () => {
     setLoading(true)
-    const { data: prods } = await supabase
+    let prodQuery = supabase
       .from('products')
       .select('*, brands(name), product_sizes(size_label, quantity), shipments(size_label, quantity, dispatched_at)')
       .order('created_at', { ascending: false })
+
+    if (isClient && user?.brandId) {
+      prodQuery = prodQuery.eq('brand_id', user.brandId)
+    }
+
+    const { data: prods } = await prodQuery
     const { data: brs } = await supabase.from('brands').select('*').order('name')
     setRawProducts(prods || [])
     setBrands(brs || [])
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [user?.brandId])
 
   const groupedOrders = (() => {
     const groups = []
@@ -135,7 +142,7 @@ export default function Orders() {
   })()
 
   const filtered = groupedOrders
-    .filter(g => (filterBrand ? g.brand_id === filterBrand : true))
+    .filter(g => (!isClient && filterBrand ? g.brand_id === filterBrand : true))
     .filter(g => {
       if (!search.trim()) return true
       const q = search.trim().toLowerCase()
@@ -179,7 +186,10 @@ export default function Orders() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4 gap-2">
-        <h2 className="text-xl font-bold text-gray-100">Orders</h2>
+        <div>
+          <h2 className="text-xl font-bold text-gray-100">Orders</h2>
+          {isClient && <p className="text-xs text-brand-400 font-medium">Viewing production runs for {user.name}</p>}
+        </div>
         {canEdit && (
           <Link
             to="/orders/new"
@@ -193,11 +203,11 @@ export default function Orders() {
       <input
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search by name, PO number, style code, or brand..."
+        placeholder="Search by garment, style code, or PO number..."
         className="w-full bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
       />
 
-      {brands.length > 0 && (
+      {!isClient && brands.length > 0 && (
         <div className="flex gap-2 overflow-x-auto pb-3 mb-2">
           <button
             onClick={() => setFilterBrand('')}
@@ -218,7 +228,7 @@ export default function Orders() {
       )}
 
       {loading ? (
-        <p className="text-gray-500 text-center py-10">Loading...</p>
+        <p className="text-gray-500 text-center py-10">Loading orders...</p>
       ) : filtered.length === 0 ? (
         <p className="text-gray-500 text-center py-10">No orders found.</p>
       ) : (
@@ -308,7 +318,7 @@ export default function Orders() {
 
             return (
               <div key={p.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-gray-700 transition relative">
-                {canEdit && (
+                {!isClient && can(user, 'edit_garments') && (
                   <button
                     onClick={(e) => { e.preventDefault(); setEditing(p) }}
                     className="absolute top-1.5 right-1.5 z-10 bg-black/60 hover:bg-black/80 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm"
