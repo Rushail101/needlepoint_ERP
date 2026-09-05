@@ -23,25 +23,32 @@ const navItems = [
 ]
 
 function Nav({ user }) {
-  const items = navItems.filter(item => !item.need || can(user, item.need))
+  const isClient = String(user?.role).toLowerCase() === 'client'
+
+  const visibleItems = navItems.filter((item) => {
+    if (!item.need) return true
+    return can(user, item.need)
+  })
+
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 flex justify-around py-2 sm:static sm:border-t-0 sm:border-b sm:py-0 sm:px-4 z-20 overflow-x-auto">
-      {items.map((item) => (
+    <div className="flex items-center gap-1 overflow-x-auto">
+      {visibleItems.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}
-          end={item.to === '/'}
           className={({ isActive }) =>
-            `flex flex-col sm:flex-row items-center gap-0 sm:gap-1.5 px-2 py-2 sm:py-4 text-[11px] sm:text-sm font-medium rounded-lg flex-shrink-0 ${
-              isActive ? 'text-brand-500' : 'text-gray-500'
+            `flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              isActive
+                ? 'bg-brand-600 text-white'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/60'
             }`
           }
         >
-          <span className="text-lg sm:text-base">{item.icon}</span>
+          <span>{item.icon}</span>
           <span>{item.label}</span>
         </NavLink>
       ))}
-    </nav>
+    </div>
   )
 }
 
