@@ -90,11 +90,22 @@ export default function GarmentCatalog() {
               canEdit ? 'hover:border-gray-700 cursor-pointer' : ''
             }`}
           >
-            <div className="aspect-square bg-gray-800">
+            <div className="aspect-square bg-gray-800 relative">
               {g.cover_photo_url ? (
                 <img src={g.cover_photo_url} alt={g.name} className="w-full h-full object-cover" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-4xl text-gray-600">👕</div>
+              )}
+              {g.tech_pack_url && (
+                <a
+                  href={g.tech_pack_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute bottom-2 left-2 bg-black/80 hover:bg-black text-brand-400 border border-brand-500/50 rounded-md px-2 py-0.5 text-[10px] font-bold flex items-center gap-1 backdrop-blur"
+                >
+                  <span>📄</span> PDF Mockup
+                </a>
               )}
             </div>
             <div className="p-2.5">
@@ -107,7 +118,7 @@ export default function GarmentCatalog() {
                     ₹{Number(g.default_price_per_piece).toLocaleString('en-IN')}
                   </span>
                 ) : (
-                  <span className="text-gray-500 text-[11px]">No default price</span>
+                  <span className="text-gray-500 text-[11px]">Pricing Pending</span>
                 )}
 
                 {orderCounts[g.id] > 0 && (
@@ -157,6 +168,8 @@ export function GarmentCatalogForm({ brands, garment, onClose, onSaved }) {
     garment?.default_price_per_piece != null ? String(garment.default_price_per_piece) : ''
   )
   const [file, setFile] = useState(null)
+  const [pdfFile, setPdfFile] = useState(null)
+  const [techPackUrl, setTechPackUrl] = useState(garment?.tech_pack_url || null)
   const [saving, setSaving] = useState(false)
 
   const save = async (e) => {
@@ -167,14 +180,22 @@ export function GarmentCatalogForm({ brands, garment, onClose, onSaved }) {
       let cover_photo_url = garment?.cover_photo_url || null
       if (file) cover_photo_url = await uploadPhoto(file, 'garments')
 
+      let finalPdfUrl = techPackUrl
+      if (pdfFile) finalPdfUrl = await uploadPhoto(pdfFile, 'garments')
+
       const finalBrandId = isClient ? user.brandId : (brandId || null)
 
       const payload = {
         name: name.trim(),
         style_code: styleCode.trim() || null,
         brand_id: finalBrandId,
-        default_price_per_piece: defaultPrice !== '' ? Number(defaultPrice) : null,
         cover_photo_url,
+        tech_pack_url: finalPdfUrl,
+      }
+
+      // Only staff/admins can set or change default_price_per_piece
+      if (!isClient) {
+        payload.default_price_per_piece = defaultPrice !== '' ? Number(defaultPrice) : null
       }
 
       if (isEdit) {
@@ -207,18 +228,45 @@ export function GarmentCatalogForm({ brands, garment, onClose, onSaved }) {
     <Modal onClose={onClose}>
       <form onSubmit={save}>
         <h3 className="text-lg font-bold mb-4 text-gray-100">{isEdit ? 'Edit Garment' : 'Add Garment'}</h3>
+        
         {garment?.cover_photo_url && !file && (
           <div className="w-full h-36 rounded-lg overflow-hidden border border-gray-800 mb-2 flex items-center justify-center bg-gray-900">
             <img src={garment.cover_photo_url} className="w-full h-full object-cover" />
           </div>
         )}
-        <label className={labelClass}>Photo</label>
+
+        <label className={labelClass}>Cover Photo</label>
         <input
           type="file"
           accept="image/*"
           onChange={(e) => setFile(e.target.files[0])}
           className="w-full mb-3 text-sm text-gray-300"
         />
+
+        {/* Tech Pack PDF Uploader */}
+        <div className="bg-gray-950 border border-gray-800 rounded-xl p-3 mb-3">
+          <label className={labelClass}>Product Mockup / Tech Pack (PDF)</label>
+          {techPackUrl && !pdfFile && (
+            <div className="flex items-center justify-between mb-2 p-2 rounded bg-gray-900 border border-gray-800 text-xs">
+              <span className="text-gray-300 truncate">📄 Mockup PDF Attached</span>
+              <a
+                href={techPackUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-brand-400 font-semibold hover:underline ml-2"
+              >
+                View
+              </a>
+            </div>
+          )}
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={(e) => setPdfFile(e.target.files[0])}
+            className="w-full text-xs text-gray-400"
+          />
+          <p className="text-[11px] text-gray-500 mt-1">Upload measurement charts, dielines, or mockups.</p>
+        </div>
 
         <label className={labelClass}>Garment name*</label>
         <input
@@ -247,14 +295,27 @@ export function GarmentCatalogForm({ brands, garment, onClose, onSaved }) {
           </div>
         )}
 
-        <label className={labelClass}>Default Price per piece (₹)</label>
-        <input
-          value={defaultPrice}
-          onChange={(e) => setDefaultPrice(e.target.value.replace(/[^0-9.]/g, ''))}
-          inputMode="decimal"
-          className={inputClass}
-          placeholder="e.g. 550 (auto-fills when creating new order)"
-        />
+        {/* Price handling: Editable for Admin/Staff, Read-only or hidden for Client */}
+        {!isClient ? (
+          <div>
+            <label className={labelClass}>Default Price per piece (₹)</label>
+            <input
+              value={defaultPrice}
+              onChange={(e) => setDefaultPrice(e.target.value.replace(/[^0-9.]/g, ''))}
+              inputMode="decimal"
+              className={inputClass}
+              placeholder="e.g. 550 (auto-fills when creating new order)"
+            />
+          </div>
+        ) : (
+          isEdit && garment?.default_price_per_piece != null && (
+            <div className="bg-gray-950 border border-gray-800 rounded-xl p-3 mb-3">
+              <span className="text-xs text-gray-400">Agreed Unit Rate: </span>
+              <strong className="text-sm text-brand-400">₹{Number(garment.default_price_per_piece).toLocaleString('en-IN')}</strong>
+              <p className="text-[10px] text-gray-500 mt-0.5">Rates are locked and configured by Needle Point.</p>
+            </div>
+          )
+        )}
 
         <FormActions onCancel={onClose} saving={saving} onDelete={isEdit ? remove : null} />
       </form>
