@@ -1,8 +1,14 @@
-// src/permissions.js
 export const ROLES = {
   admin: {
     label: 'Admin',
     can: [
+      // View permissions checked by navItems:
+      'view_brands',
+      'view_team',
+      'manage_work_logs',
+      'view_access',
+
+      // Action permissions:
       'view_orders',
       'create_orders',
       'edit_garments',
@@ -10,7 +16,6 @@ export const ROLES = {
       'manage_garment_catalog',
       'view_financials',
       'log_work',
-      'view_work_logs',
       'manage_employees',
       'manage_brands',
       'manage_pins',
@@ -19,13 +24,15 @@ export const ROLES = {
   manager: {
     label: 'Manager',
     can: [
+      'view_brands',
+      'view_team',
+      'manage_work_logs',
       'view_orders',
       'create_orders',
       'edit_garments',
       'manage_garment_catalog',
       'view_financials',
       'log_work',
-      'view_work_logs',
     ],
   },
   tailor: {
@@ -45,7 +52,8 @@ export const ROLES = {
 
 export function can(user, action) {
   if (!user || !user.role) return false
-  const roleConfig = ROLES[user.role.toLowerCase()]
+  const roleKey = String(user.role).toLowerCase()
+  const roleConfig = ROLES[roleKey]
   if (!roleConfig) return false
   return roleConfig.can.includes(action)
 }
