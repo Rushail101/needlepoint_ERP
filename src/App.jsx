@@ -24,8 +24,6 @@ const navItems = [
 ]
 
 function Nav({ user }) {
-  const isClient = String(user?.role).toLowerCase() === 'client'
-
   const visibleItems = navItems.filter((item) => {
     if (!item.need) return true
     return can(user, item.need)
