@@ -1,200 +1,684 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
+import { STAGES, stageInfo } from '../stages.js'
+import { WORK_TYPES, WORK_TYPE_LABEL } from '../workTypes.js'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
-import { STAGES } from '../stages.js'
+import ShipmentModal from '../components/ShipmentModal.jsx'
 import { exportProductPDF } from '../pdfExport.js'
-import ProductQR from '../components/ProductQR.jsx'
 import { useAuth } from '../components/PinGate.jsx'
 import { can } from '../permissions.js'
-import { WORK_TYPES, WORK_TYPE_LABEL } from '../workTypes.js'
-import { buildOrderSummaryText, buildWhatsAppUrl } from '../orderSummary.js'
-import ShipmentModal from '../components/ShipmentModal.jsx'
 
 export default function ProductDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
-  const canEditGarment = can(user, 'edit_garments')
-  const canManageSizes = can(user, 'manage_sizes')
-  const canManagePhotos = can(user, 'manage_photos')
-  const canManageWorkLogs = can(user, 'manage_work_logs')
-  const canManageSamples = can(user, 'manage_samples')
-  const canChangeStage = can(user, 'change_stage')
-  const canExport = can(user, 'export_pdf')
-  const canViewPricing = can(user, 'view_pricing')
+  const canEdit = can(user, 'edit_garments')
+  const canLog = can(user, 'log_work')
+
   const [product, setProduct] = useState(null)
-  const [brands, setBrands] = useState([])
   const [sizes, setSizes] = useState([])
   const [photos, setPhotos] = useState([])
   const [logs, setLogs] = useState([])
-  const [samples, setSamples] = useState([])
-  const [tab, setTab] = useState('sizes')
-  const [editingProduct, setEditingProduct] = useState(false)
-  const [exporting, setExporting] = useState(false)
-  const [showShipments, setShowShipments] = useState(false)
+  const [employees, setEmployees] = useState([])
+  const [brands, setBrands] = useState([])
+  const [loading, setLoading] = useState(true)
 
-  const load = async () => {
-    const { data: p } = await supabase.from('products').select('*, brands(name, contact_phone)').eq('id', id).single()
-    const { data: b } = await supabase.from('brands').select('*').order('name')
-    const { data: s } = await supabase.from('product_sizes').select('*').eq('product_id', id).order('created_at')
-    const { data: ph } = await supabase.from('product_photos').select('*').eq('product_id', id).order('created_at', { ascending: false })
-    const { data: l } = await supabase.from('work_logs').select('*, employees(name)').eq('product_id', id).order('logged_at', { ascending: false })
-    const { data: sv } = await supabase.from('sample_versions').select('*').eq('product_id', id).order('version_number', { ascending: false })
-    setProduct(p); setBrands(b || []); setSizes(s || []); setPhotos(ph || []); setLogs(l || []); setSamples(sv || [])
-  }
+  const [activeTab, setActiveTab] = useState('sizes')
+  const [showEdit, setShowEdit] = useState(false)
+  const [showLogWork, setShowLogWork] = useState(false)
+  const [showQR, setShowQR] = useState(false)
+  const [showShipmentModal, setShowShipmentModal] = useState(false)
 
-  useEffect(() => { load() }, [id])
+  const loadProduct = async () => {
+    setLoading(true)
+    const { data: prod, error } = await supabase
+      .from('products')
+      .select('*, brands(name), shipments(size_label, quantity, dispatched_at)')
+      .eq('id', id)
+      .single()
 
-  if (!product) return <p className="text-gray-500 text-center py-10">Loading...</p>
-
-  const totalQty = sizes.reduce((sum, s) => sum + (s.quantity || 0), 0)
-
-  const changeStage = async (newStage) => {
-    await supabase.from('products').update({ stage: newStage }).eq('id', id)
-    load()
-  }
-
-  const doExport = async () => {
-    setExporting(true)
-    try {
-      await exportProductPDF({ product, sizes, photos, logs, samples, workTypeLabel: WORK_TYPE_LABEL })
-    } catch (err) {
-      alert('Could not export PDF: ' + err.message)
-    } finally {
-      setExporting(false)
+    if (error || !prod) {
+      alert('Order not found')
+      navigate('/orders')
+      return
     }
+
+    const [{ data: sz }, { data: ph }, { data: lg }, { data: emps }, { data: brs }] = await Promise.all([
+      supabase.from('product_sizes').select('*').eq('product_id', id).order('size_label'),
+      supabase.from('product_photos').select('*').eq('product_id', id).order('created_at', { ascending: false }),
+      supabase.from('work_logs').select('*, employees(name)').eq('product_id', id).order('created_at', { ascending: false }),
+      supabase.from('employees').select('*').eq('active', true).order('name'),
+      supabase.from('brands').select('*').order('name'),
+    ])
+
+    setProduct(prod)
+    setSizes(sz || [])
+    setPhotos(ph || [])
+    setLogs(lg || [])
+    setEmployees(emps || [])
+    setBrands(brs || [])
+    setLoading(false)
   }
+
+  useEffect(() => {
+    loadProduct()
+  }, [id])
+
+  const updateStage = async (newStage) => {
+    const { error } = await supabase.from('products').update({ stage: newStage }).eq('id', id)
+    if (error) {
+      alert('Error updating stage: ' + error.message)
+      return
+    }
+    setProduct((prev) => ({ ...prev, stage: newStage }))
+  }
+
+  const handleExportPDF = () => {
+    exportProductPDF({ product, sizes })
+  }
+
+  if (loading || !product) {
+    return <div className="text-gray-400 text-center py-10">Loading garment details...</div>
+  }
+
+  const totalQty = sizes.reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
+  const totalShipped = (product.shipments || []).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
+  const logUrl = `${window.location.origin}/products/${product.id}`
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(logUrl)}`
 
   return (
-    <div>
-      <Link to="/" className="text-brand-500 text-sm font-medium">← Back to Orders</Link>
+    <div className="space-y-4">
+      {/* Top Breadcrumb */}
+      <div>
+        <Link to="/orders" className="text-brand-500 hover:text-brand-400 text-sm font-semibold flex items-center gap-1">
+          ← Back to Orders
+        </Link>
+      </div>
 
-      <div className="flex gap-4 mt-3 mb-3 items-start">
-        <div className="w-24 h-24 rounded-xl bg-gray-800 overflow-hidden flex-shrink-0 flex items-center justify-center">
-          {product.cover_photo_url
-            ? <img src={product.cover_photo_url} className="w-full h-full object-cover" />
-            : <div className="text-3xl text-gray-600">👕</div>}
+      {/* Main Details Header Card */}
+      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 sm:p-5 relative">
+        <div className="flex flex-col sm:flex-row gap-4 sm:items-center justify-between">
+          <div className="flex gap-3.5 items-center min-w-0">
+            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-gray-800 border border-gray-700 overflow-hidden flex items-center justify-center flex-shrink-0">
+              {product.cover_photo_url ? (
+                <img src={product.cover_photo_url} alt={product.name} className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-3xl text-gray-600">👕</span>
+              )}
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-lg sm:text-2xl font-black text-gray-100 uppercase tracking-tight truncate">
+                {product.name}
+              </h1>
+              <p className="text-xs text-gray-400">
+                {product.brands?.name || 'Independent'}
+                {product.po_number && <span> · PO: <strong className="text-gray-300 font-mono">{product.po_number}</strong></span>}
+                {product.style_code && <span> · Style: <strong className="text-gray-300">{product.style_code}</strong></span>}
+              </p>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-xs font-semibold text-brand-400">Total qty: {totalQty}</span>
+                {totalShipped > 0 && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/60 text-emerald-400 font-semibold">
+                    🚚 {totalShipped}/{totalQty} shipped
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+            {canEdit && (
+              <button
+                onClick={() => setShowEdit(true)}
+                className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 rounded-xl px-3 py-1.5 text-xs font-semibold"
+              >
+                Edit
+              </button>
+            )}
+            <button
+              onClick={() => setShowShipmentModal(true)}
+              className="bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-800/70 text-emerald-300 rounded-xl px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5"
+            >
+              <span>🚚</span> Dispatches
+            </button>
+            <button
+              onClick={handleExportPDF}
+              className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 rounded-xl px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5"
+            >
+              <span>📄</span> Export PDF
+            </button>
+          </div>
         </div>
-        <div className="flex-1 min-w-0">
-          <h2 className="text-xl font-bold text-gray-100">{product.name}</h2>
-          <p className="text-sm text-gray-400">{product.brands?.name || 'No brand'} {product.style_code ? `· ${product.style_code}` : ''}</p>
-          <p className="text-sm text-gray-400 mt-1">Total qty: <span className="font-semibold text-gray-200">{totalQty}</span></p>
-        </div>
-        {canEditGarment && (
-          <button onClick={() => setEditingProduct(true)}
-            className="bg-gray-800 border border-gray-700 hover:border-gray-600 text-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium flex-shrink-0">
-            Edit
+
+        {/* Stage & QR Bar */}
+        <div className="mt-4 pt-3.5 border-t border-gray-800 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-gray-400">Stage:</span>
+            {canEdit ? (
+              <select
+                value={product.stage || 'cutting'}
+                onChange={(e) => updateStage(e.target.value)}
+                className="bg-gray-950 border border-gray-700 text-gray-200 rounded-lg px-2.5 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-brand-500"
+              >
+                {STAGES.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className={`px-2 py-0.5 rounded-full text-xs ${stageInfo(product.stage).color}`}>
+                {stageInfo(product.stage).label}
+              </span>
+            )}
+          </div>
+
+          <button
+            onClick={() => setShowQR(true)}
+            className="bg-gray-950 hover:bg-gray-800 border border-gray-800 text-gray-300 rounded-lg px-2.5 py-1 text-xs font-medium flex items-center gap-1.5"
+          >
+            <span>📱</span> Show QR Code for Quick Logging
           </button>
+        </div>
+
+        {/* Planned Operations Summary */}
+        {product.planned_work?.length > 0 && (
+          <div className="mt-3 bg-gray-950/60 border border-gray-800/80 rounded-xl p-2.5 text-xs">
+            <span className="text-gray-500 uppercase tracking-wider text-[10px] font-bold mr-2">Planned Work:</span>
+            <div className="inline-flex flex-wrap gap-1.5 mt-1 sm:mt-0">
+              {product.planned_work.map((w, idx) => (
+                <span key={idx} className="bg-gray-800 text-gray-300 px-2 py-0.5 rounded-md text-[11px] font-medium">
+                  {w}
+                </span>
+              ))}
+            </div>
+          </div>
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <label className="text-xs text-gray-500">Stage:</label>
-        {canChangeStage ? (
-          <select value={product.stage || 'cutting'} onChange={(e) => changeStage(e.target.value)}
-            className="bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-2 py-1.5 text-sm">
-            {STAGES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-          </select>
-        ) : (
-          <span className="text-sm text-gray-300">{STAGES.find(s => s.key === (product.stage || 'cutting'))?.label}</span>
-        )}
-        {canExport && (
-          <button onClick={doExport} disabled={exporting}
-            className="ml-auto bg-gray-800 border border-gray-700 hover:border-gray-600 text-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50">
-            {exporting ? 'Exporting...' : '📄 Export PDF'}
-          </button>
-        )}
+      {/* Navigation Tabs */}
+      <div className="flex border-b border-gray-800 text-sm gap-2">
+        <button
+          onClick={() => setActiveTab('sizes')}
+          className={`pb-2 px-3 font-semibold transition ${
+            activeTab === 'sizes' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          Sizes & Qty
+        </button>
+        <button
+          onClick={() => setActiveTab('photos')}
+          className={`pb-2 px-3 font-semibold transition ${
+            activeTab === 'photos' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          Photos ({photos.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('work')}
+          className={`pb-2 px-3 font-semibold transition ${
+            activeTab === 'work' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          Work History ({logs.length})
+        </button>
       </div>
 
-      {canManageWorkLogs && <ProductQR productId={product.id} />}
-
-      {(product.planned_work?.length > 0 || (canViewPricing && product.price_per_piece)) && (
-        <OrderSummaryPanel product={product} sizes={sizes} canViewPricing={canViewPricing} canManageWorkLogs={canManageWorkLogs} />
+      {/* TAB 1: SIZES & QUANTITIES */}
+      {activeTab === 'sizes' && (
+        <SizesTab
+          productId={product.id}
+          sizes={sizes}
+          canEdit={canEdit}
+          onReload={loadProduct}
+        />
       )}
 
-      <div className="flex gap-1 border-b border-gray-800 mb-4 overflow-x-auto">
-        {[
-          ['sizes', 'Sizes & Qty'],
-          ['photos', 'Photos'],
-          ['work', 'Work History'],
-          ['samples', 'Sample Versions'],
-        ].map(([key, label]) => (
-          <button key={key} onClick={() => setTab(key)}
-            className={`px-3 py-2 text-sm font-medium whitespace-nowrap border-b-2 ${tab === key ? 'border-brand-500 text-brand-500' : 'border-transparent text-gray-500'}`}>
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* TAB 2: PHOTOS */}
+      {activeTab === 'photos' && (
+        <PhotosTab
+          productId={product.id}
+          photos={photos}
+          canEdit={canEdit}
+          onReload={loadProduct}
+        />
+      )}
 
-      {tab === 'sizes' && <SizesTab productId={id} sizes={sizes} onChange={load} canEdit={canManageSizes} />}
-      {tab === 'photos' && <PhotosTab productId={id} photos={photos} onChange={load} canEdit={canManagePhotos} />}
-      {tab === 'work' && <WorkTab logs={logs} onChange={load} canEdit={canManageWorkLogs} />}
-      {tab === 'samples' && <SamplesTab productId={id} samples={samples} onChange={load} canEdit={canManageSamples} />}
+      {/* TAB 3: WORK HISTORY */}
+      {activeTab === 'work' && (
+        <WorkLogsTab
+          productId={product.id}
+          logs={logs}
+          canLog={canLog}
+          onOpenLogModal={() => setShowLogWork(true)}
+          onReload={loadProduct}
+        />
+      )}
 
-      {editingProduct && (
-        <ProductForm
+      {/* MODAL: DISPATCHES & PARTIAL DELIVERIES */}
+      {showShipmentModal && (
+        <ShipmentModal
           product={product}
           sizes={sizes}
+          onClose={() => setShowShipmentModal(false)}
+          onUpdated={loadProduct}
+        />
+      )}
+
+      {/* MODAL: QR CODE FOR FLOOR SCANNING */}
+      {showQR && (
+        <Modal onClose={() => setShowQR(false)}>
+          <div className="text-center p-2">
+            <h3 className="text-lg font-bold text-gray-100">{product.name}</h3>
+            <p className="text-xs text-gray-400 mb-4">{product.po_number || 'Single Order'}</p>
+            <div className="w-56 h-56 mx-auto bg-white p-3 rounded-2xl flex items-center justify-center shadow-lg">
+              <img src={qrUrl} alt="Garment Log QR" className="w-full h-full" />
+            </div>
+            <p className="text-xs text-gray-400 mt-4">
+              Scan with any mobile phone camera to open this garment, update stages, or record worker logs directly.
+            </p>
+          </div>
+        </Modal>
+      )}
+
+      {/* MODAL: LOG WORK ENTRY */}
+      {showLogWork && (
+        <LogWorkModal
+          productId={product.id}
+          employees={employees}
+          onClose={() => setShowLogWork(false)}
+          onSaved={() => {
+            setShowLogWork(false)
+            loadProduct()
+          }}
+        />
+      )}
+
+      {/* MODAL: EDIT PRODUCT DETAILS */}
+      {showEdit && (
+        <EditProductModal
+          product={product}
           brands={brands}
-          onClose={() => setEditingProduct(false)}
-          onSaved={() => { setEditingProduct(false); load() }}
-          onDeleted={() => navigate('/')}
+          onClose={() => setShowEdit(false)}
+          onSaved={() => {
+            setShowEdit(false)
+            loadProduct()
+          }}
+          onDeleted={() => {
+            setShowEdit(false)
+            navigate('/orders')
+          }}
         />
       )}
     </div>
   )
 }
 
-function ProductForm({ product, sizes, brands, onClose, onSaved, onDeleted }) {
-  const [name, setName] = useState(product.name || '')
-  const [styleCode, setStyleCode] = useState(product.style_code || '')
-  const [brandId, setBrandId] = useState(product.brand_id || '')
-  const [status, setStatus] = useState(product.status || 'in_production')
-  const [pricePerPiece, setPricePerPiece] = useState(product.price_per_piece != null ? String(product.price_per_piece) : '')
-  const [gstRate, setGstRate] = useState(product.gst_rate != null ? Number(product.gst_rate) : 5)
-  const [plannedWork, setPlannedWork] = useState(product.planned_work || [])
-  const [file, setFile] = useState(null)
+// ─────────────────────────────────────────────────────────────────────────────
+// SUB-COMPONENT: SIZES TAB
+// ─────────────────────────────────────────────────────────────────────────────
+function SizesTab({ productId, sizes, canEdit, onReload }) {
+  const [sizeList, setSizeList] = useState(sizes)
+  const [newLabel, setNewLabel] = useState('')
+  const [newQty, setNewQty] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const toggleWork = (key) => {
-    setPlannedWork(prev => prev.includes(key) ? prev.filter(w => w !== key) : [...prev, key])
+  useEffect(() => {
+    setSizeList(sizes)
+  }, [sizes])
+
+  const updateQuantity = async (sizeId, qty) => {
+    const validQty = Math.max(0, parseInt(qty, 10) || 0)
+    await supabase.from('product_sizes').update({ quantity: validQty }).eq('id', sizeId)
+    onReload()
   }
 
-  const totalQty = (sizes || []).reduce((sum, s) => sum + (Number(s.quantity) || 0), 0)
-  const hasPricing = Boolean(pricePerPiece && !isNaN(Number(pricePerPiece)) && totalQty > 0)
-  const subtotal = hasPricing ? Number(pricePerPiece) * totalQty : 0
-  const gstAmount = hasPricing ? (subtotal * Number(gstRate)) / 100 : 0
-  const finalTotal = hasPricing ? Math.round(subtotal + gstAmount) : null
+  const addSize = async (e) => {
+    e.preventDefault()
+    if (!newLabel.trim()) return
+    setSaving(true)
+    try {
+      await supabase.from('product_sizes').insert({
+        product_id: productId,
+        size_label: newLabel.trim().toUpperCase(),
+        quantity: parseInt(newQty, 10) || 0,
+      })
+      setNewLabel('')
+      setNewQty('')
+      onReload()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const removeSize = async (sizeId) => {
+    if (!confirm('Remove this size?')) return
+    await supabase.from('product_sizes').delete().eq('id', sizeId)
+    onReload()
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        {sizeList.map((s) => (
+          <div
+            key={s.id}
+            className="flex items-center justify-between bg-gray-900 border border-gray-800 rounded-xl px-4 py-2.5"
+          >
+            <span className="font-bold text-gray-200 text-sm w-16">{s.size_label}</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                disabled={!canEdit}
+                value={s.quantity}
+                onChange={(e) => {
+                  const val = e.target.value
+                  setSizeList((prev) => prev.map((item) => (item.id === s.id ? { ...item, quantity: val } : item)))
+                }}
+                onBlur={(e) => updateQuantity(s.id, e.target.value)}
+                className="w-20 bg-gray-950 border border-gray-700 text-gray-100 rounded-lg px-2.5 py-1 text-right text-sm font-semibold focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+              <span className="text-xs text-gray-400">pcs</span>
+              {canEdit && (
+                <button
+                  onClick={() => removeSize(s.id)}
+                  className="text-xs text-gray-500 hover:text-red-400 ml-3"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {canEdit && (
+        <form onSubmit={addSize} className="flex gap-2 pt-2">
+          <input
+            placeholder="Size (e.g. 2XL)"
+            value={newLabel}
+            onChange={(e) => setNewLabel(e.target.value)}
+            className="w-28 bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-xs text-gray-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+          <input
+            type="number"
+            placeholder="Qty"
+            value={newQty}
+            onChange={(e) => setNewQty(e.target.value)}
+            className="w-24 bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-xs text-gray-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+          <button
+            type="submit"
+            disabled={saving}
+            className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 text-xs font-semibold"
+          >
+            + Add Size
+          </button>
+        </form>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUB-COMPONENT: PHOTOS TAB
+// ─────────────────────────────────────────────────────────────────────────────
+function PhotosTab({ productId, photos, canEdit, onReload }) {
+  const [uploading, setUploading] = useState(false)
+
+  const handleUpload = async (e) => {
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
+    setUploading(true)
+    try {
+      for (const file of files) {
+        const url = await uploadPhoto(file, 'products')
+        await supabase.from('product_photos').insert({ product_id: productId, photo_url: url })
+      }
+      onReload()
+    } catch (err) {
+      alert('Upload failed: ' + err.message)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const removePhoto = async (photoId) => {
+    if (!confirm('Delete photo?')) return
+    await supabase.from('product_photos').delete().eq('id', photoId)
+    onReload()
+  }
+
+  return (
+    <div className="space-y-4">
+      {canEdit && (
+        <div>
+          <label className="inline-block bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 text-xs font-semibold cursor-pointer">
+            {uploading ? 'Uploading...' : '+ Upload Photos'}
+            <input type="file" multiple accept="image/*" onChange={handleUpload} className="hidden" disabled={uploading} />
+          </label>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+        {photos.map((p) => (
+          <div key={p.id} className="aspect-square rounded-xl bg-gray-900 border border-gray-800 overflow-hidden relative group">
+            <img src={p.photo_url} alt="" className="w-full h-full object-cover" />
+            {canEdit && (
+              <button
+                onClick={() => removePhoto(p.id)}
+                className="absolute top-2 right-2 bg-black/70 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        ))}
+        {photos.length === 0 && <p className="text-xs text-gray-500">No additional photos uploaded yet.</p>}
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUB-COMPONENT: WORK LOGS TAB
+// ─────────────────────────────────────────────────────────────────────────────
+function WorkLogsTab({ productId, logs, canLog, onOpenLogModal, onReload }) {
+  const deleteLog = async (logId) => {
+    if (!confirm('Delete this work log entry?')) return
+    await supabase.from('work_logs').delete().eq('id', logId)
+    onReload()
+  }
+
+  return (
+    <div className="space-y-3">
+      {canLog && (
+        <div>
+          <button
+            onClick={onOpenLogModal}
+            className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 text-xs font-semibold"
+          >
+            + Record Completed Work
+          </button>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {logs.map((l) => (
+          <div
+            key={l.id}
+            className="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between text-xs"
+          >
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-gray-200">{l.employees?.name || 'Unknown Tailor'}</span>
+                <span className="bg-gray-800 text-gray-300 px-2 py-0.5 rounded text-[11px]">
+                  {WORK_TYPE_LABEL?.[l.work_type] || l.work_type}
+                </span>
+                <span className="font-mono text-brand-400 font-bold">{l.pieces} pcs</span>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1">
+                {new Date(l.created_at).toLocaleString('en-IN', {
+                  day: '2-digit',
+                  month: 'short',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+                {l.notes && ` · "${l.notes}"`}
+              </p>
+            </div>
+
+            {canLog && (
+              <button onClick={() => deleteLog(l.id)} className="text-gray-500 hover:text-red-400 px-2 text-sm">
+                ✕
+              </button>
+            )}
+          </div>
+        ))}
+        {logs.length === 0 && <p className="text-xs text-gray-500 py-4">No completed work entries logged yet.</p>}
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUB-COMPONENT: RECORD WORK MODAL
+// ─────────────────────────────────────────────────────────────────────────────
+function LogWorkModal({ productId, employees, onClose, onSaved }) {
+  const [employeeId, setEmployeeId] = useState(employees[0]?.id || '')
+  const [workType, setWorkType] = useState('stitching')
+  const [pieces, setPieces] = useState('')
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const save = async (e) => {
+    e.preventDefault()
+    if (!pieces || parseInt(pieces, 10) <= 0) return
+    setSaving(true)
+    try {
+      await supabase.from('work_logs').insert({
+        product_id: productId,
+        employee_id: employeeId || null,
+        work_type: workType,
+        pieces: parseInt(pieces, 10),
+        notes: notes.trim() || null,
+      })
+      onSaved()
+    } catch (err) {
+      alert('Could not record work: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <form onSubmit={save} className="space-y-3">
+        <h3 className="text-lg font-bold text-gray-100 mb-2">Record Tailor / Floor Work</h3>
+
+        <div>
+          <label className={labelClass}>Worker / Tailor*</label>
+          <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={inputClass} required>
+            <option value="">Select Employee</option>
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name} ({e.role})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className={labelClass}>Operation Performed*</label>
+          <select value={workType} onChange={(e) => setWorkType(e.target.value)} className={inputClass}>
+            {WORK_TYPES.map((w) => (
+              <option key={w.key} value={w.key}>
+                {w.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className={labelClass}>Pieces Completed*</label>
+          <input
+            type="number"
+            min="1"
+            value={pieces}
+            onChange={(e) => setPieces(e.target.value)}
+            className={inputClass}
+            placeholder="e.g. 25"
+            required
+          />
+        </div>
+
+        <div>
+          <label className={labelClass}>Notes (optional)</label>
+          <input
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className={inputClass}
+            placeholder="e.g. Front pockets completed"
+          />
+        </div>
+
+        <FormActions onCancel={onClose} saving={saving} />
+      </form>
+    </Modal>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUB-COMPONENT: EDIT PRODUCT MODAL
+// ─────────────────────────────────────────────────────────────────────────────
+function EditProductModal({ product, brands, onClose, onSaved, onDeleted }) {
+  const [name, setName] = useState(product.name || '')
+  const [styleCode, setStyleCode] = useState(product.style_code || '')
+  const [poNumber, setPoNumber] = useState(product.po_number || '')
+  const [brandId, setBrandId] = useState(product.brand_id || '')
+  const [status, setStatus] = useState(product.status || 'in_production')
+  const [stage, setStage] = useState(product.stage || 'cutting')
+  const [pricePerPiece, setPricePerPiece] = useState(product.price_per_piece != null ? String(product.price_per_piece) : '')
+  const [gstRate, setGstRate] = useState(product.gst_rate != null ? Number(product.gst_rate) : 5)
+  const [file, setFile] = useState(null)
+  const [saving, setSaving] = useState(false)
 
   const save = async (e) => {
     e.preventDefault()
     if (!name.trim()) return
     setSaving(true)
     try {
-      let cover_photo_url = product.cover_photo_url || null
-      if (file) cover_photo_url = await uploadPhoto(file, 'products')
-      await supabase.from('products').update({
-        name: name.trim(),
-        style_code: styleCode.trim() || null,
-        brand_id: brandId || null,
-        status,
-        cover_photo_url,
-        price_per_piece: pricePerPiece === '' ? null : Number(pricePerPiece),
-        gst_rate: Number(gstRate),
-        total_amount: finalTotal,
-        planned_work: plannedWork,
-      }).eq('id', product.id)
+      let cover_photo_url = product.cover_photo_url
+      if (file) {
+        cover_photo_url = await uploadPhoto(file, 'products')
+      }
+
+      await supabase
+        .from('products')
+        .update({
+          name: name.trim(),
+          style_code: styleCode.trim() || null,
+          po_number: poNumber.trim() || null,
+          brand_id: brandId || null,
+          status,
+          stage,
+          price_per_piece: pricePerPiece ? Number(pricePerPiece) : null,
+          gst_rate: Number(gstRate),
+          cover_photo_url,
+        })
+        .eq('id', product.id)
+
       onSaved()
     } catch (err) {
-      alert('Could not save: ' + err.message)
+      alert('Error updating order: ' + err.message)
     } finally {
       setSaving(false)
     }
   }
 
   const remove = async () => {
-    if (!confirm(`Delete "${product.name}"? This removes all its photos, sizes, work history and sample versions too.`)) return
+    if (!confirm(`Delete "${product.name}"? This permanently removes all logs, sizes, and dispatches.`)) return
     setSaving(true)
     try {
       await supabase.from('products').delete().eq('id', product.id)
@@ -208,485 +692,56 @@ function ProductForm({ product, sizes, brands, onClose, onSaved, onDeleted }) {
 
   return (
     <Modal onClose={onClose}>
-      <form onSubmit={save}>
-        <h3 className="text-lg font-bold mb-4 text-gray-100">Edit Garment</h3>
-        {product.cover_photo_url && !file && (
-          <div className="w-full h-36 rounded-lg overflow-hidden border border-gray-800 mb-2 flex items-center justify-center bg-gray-900">
-            <img src={product.cover_photo_url} className="w-full h-full object-cover" />
-          </div>
-        )}
-        <label className={labelClass}>Photo</label>
-        <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm text-gray-300" />
-        <label className={labelClass}>Garment name*</label>
+      <form onSubmit={save} className="space-y-3">
+        <h3 className="text-lg font-bold text-gray-100">Edit Order Details</h3>
+
+        <label className={labelClass}>Garment Name*</label>
         <input value={name} onChange={(e) => setName(e.target.value)} className={inputClass} required />
-        <label className={labelClass}>Style code</label>
-        <input value={styleCode} onChange={(e) => setStyleCode(e.target.value)} className={inputClass} />
+
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className={labelClass}>PO Number</label>
+            <input value={poNumber} onChange={(e) => setPoNumber(e.target.value)} className={inputClass} />
+          </div>
+          <div>
+            <label className={labelClass}>Style Code</label>
+            <input value={styleCode} onChange={(e) => setStyleCode(e.target.value)} className={inputClass} />
+          </div>
+        </div>
+
         <label className={labelClass}>Brand</label>
         <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className={inputClass}>
           <option value="">No brand</option>
-          {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
-        <label className={labelClass}>Status</label>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass}>
-          <option value="in_production">In Production</option>
-          <option value="sampling">Sampling</option>
-          <option value="completed">Completed</option>
-          <option value="on_hold">On Hold</option>
-        </select>
-
-        <label className={labelClass}>Work required</label>
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          {WORK_TYPES.map(w => (
-            <button key={w.key} type="button" onClick={() => toggleWork(w.key)}
-              className={`border rounded-xl p-3 flex flex-col items-center gap-1 ${plannedWork.includes(w.key) ? 'bg-brand-600 text-white border-brand-600' : 'bg-gray-800 border-gray-700 text-gray-200'}`}>
-              <span className="text-xl">{w.icon}</span>
-              <span className="text-xs font-medium text-center">{w.label}</span>
-            </button>
+          {brands.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
           ))}
-        </div>
+        </select>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+        <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className={labelClass}>Price per piece (₹)</label>
+            <label className={labelClass}>Price / pc (₹)</label>
             <input
               value={pricePerPiece}
               onChange={(e) => setPricePerPiece(e.target.value.replace(/[^0-9.]/g, ''))}
-              inputMode="decimal"
               className={inputClass}
-              placeholder="Rate before GST"
             />
           </div>
           <div>
             <label className={labelClass}>GST Slab</label>
-            <div className="flex gap-2">
-              {[
-                { label: '0%', value: 0 },
-                { label: '5%', value: 5 },
-                { label: '18%', value: 18 },
-              ].map(slab => (
-                <button
-                  key={slab.value}
-                  type="button"
-                  onClick={() => setGstRate(slab.value)}
-                  className={`flex-1 py-2 rounded-lg text-xs font-semibold border transition ${
-                    gstRate === slab.value
-                      ? 'bg-brand-600 border-brand-600 text-white'
-                      : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600'
-                  }`}
-                >
-                  {slab.label}
-                </button>
-              ))}
-            </div>
+            <select value={gstRate} onChange={(e) => setGstRate(Number(e.target.value))} className={inputClass}>
+              <option value={0}>0%</option>
+              <option value={5}>5%</option>
+              <option value={18}>18%</option>
+            </select>
           </div>
         </div>
 
-        {totalQty > 0 && (
-          <div className="bg-gray-950/60 border border-gray-800 rounded-xl p-3 mb-4 space-y-1.5 text-xs">
-            <div className="flex justify-between text-gray-400">
-              <span>Total Quantity:</span>
-              <span className="font-medium text-gray-200">{totalQty} pcs</span>
-            </div>
-            {hasPricing && (
-              <>
-                <div className="flex justify-between text-gray-400">
-                  <span>Subtotal (Taxable):</span>
-                  <span>₹{subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex justify-between text-gray-400">
-                  <span>GST ({gstRate}%):</span>
-                  <span>₹{gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div className="border-t border-gray-800 pt-1.5 mt-1 flex justify-between font-bold text-sm text-gray-100">
-                  <span>Grand Total:</span>
-                  <span className="text-brand-400">
-                    ₹{finalTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
-        )}
+        <label className={labelClass}>Replace Cover Photo</label>
+        <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files[0])} className="w-full text-xs text-gray-400 mb-2" />
 
         <FormActions onCancel={onClose} saving={saving} onDelete={remove} />
-      </form>
-    </Modal>
-  )
-}
-
-function OrderSummaryPanel({ product, sizes, canViewPricing, canManageWorkLogs }) {
-  const totalQty = sizes.reduce((sum, s) => sum + (s.quantity || 0), 0)
-  const pricePerPiece = Number(product.price_per_piece || 0)
-  const subtotal = pricePerPiece > 0 && totalQty > 0 ? pricePerPiece * totalQty : 0
-  const gstRate = product.gst_rate != null ? Number(product.gst_rate) : 5
-  const gstAmount = subtotal > 0 ? (subtotal * gstRate) / 100 : 0
-  const grandTotal = product.total_amount != null
-    ? Number(product.total_amount)
-    : Math.round(subtotal + gstAmount)
-
-  const share = () => {
-    const text = buildOrderSummaryText({
-      product,
-      brandName: product.brands?.name,
-      sizes,
-      subtotal,
-      gstRate,
-      gstAmount,
-      grandTotal,
-    })
-    window.open(buildWhatsAppUrl(text, product.brands?.contact_phone), '_blank')
-  }
-
-  const copy = async () => {
-    const text = buildOrderSummaryText({
-      product,
-      brandName: product.brands?.name,
-      sizes,
-      subtotal,
-      gstRate,
-      gstAmount,
-      grandTotal,
-    })
-    try {
-      await navigator.clipboard.writeText(text)
-      alert('Summary copied to clipboard.')
-    } catch {
-      alert('Could not copy — your browser may not allow clipboard access here.')
-    }
-  }
-
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
-      <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Order Summary</p>
-
-      {canManageWorkLogs && product.planned_work?.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-3">
-          {product.planned_work.map(w => (
-            <span key={w} className="text-[11px] px-2 py-0.5 rounded-full bg-gray-800 text-gray-300">
-              {WORK_TYPE_LABEL[w] || w}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {canViewPricing && product.price_per_piece && (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-            <div>
-              <p className="text-2xl font-bold text-gray-100">
-                ₹{pricePerPiece.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </p>
-              <p className="text-xs text-gray-500">Price per piece (Base)</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-brand-400">
-                ₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-              </p>
-              <p className="text-xs text-gray-400">Total Order Value ({totalQty} pcs)</p>
-              {gstRate > 0 && (
-                <p className="text-[11px] text-gray-500 mt-0.5">
-                  Base: ₹{subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + GST ({gstRate}%): ₹{gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={share} className="flex-1 bg-green-800 hover:bg-green-700 text-white rounded-lg py-2 text-sm font-medium">
-              💬 Share via WhatsApp
-            </button>
-            <button onClick={copy} className="flex-1 bg-gray-800 border border-gray-700 hover:border-gray-600 text-gray-200 rounded-lg py-2 text-sm font-medium">
-              Copy Summary
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-function SizesTab({ productId, sizes, onChange, canEdit }) {
-  const [label, setLabel] = useState('')
-  const [qty, setQty] = useState('')
-
-  const add = async (e) => {
-    e.preventDefault()
-    if (!label.trim()) return
-    await supabase.from('product_sizes').insert({ product_id: productId, size_label: label.trim(), quantity: Number(qty) || 0 })
-    setLabel(''); setQty(''); onChange()
-  }
-
-  const updateQty = async (sizeId, newQty) => {
-    await supabase.from('product_sizes').update({ quantity: Number(newQty) || 0 }).eq('id', sizeId)
-    onChange()
-  }
-
-  const updateLabel = async (sizeId, newLabel) => {
-    if (!newLabel.trim()) return
-    await supabase.from('product_sizes').update({ size_label: newLabel.trim() }).eq('id', sizeId)
-    onChange()
-  }
-
-  const remove = async (sizeId) => {
-    await supabase.from('product_sizes').delete().eq('id', sizeId)
-    onChange()
-  }
-
-  return (
-    <div>
-      <div className="space-y-2 mb-4">
-        {sizes.map(s => (
-          <div key={s.id} className="flex items-center gap-2 bg-gray-900 border border-gray-800 rounded-xl p-3">
-            {canEdit ? (
-              <>
-                <input defaultValue={s.size_label}
-                  onBlur={(e) => updateLabel(s.id, e.target.value)}
-                  className="font-semibold w-16 bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-2 py-1 text-sm" />
-                <input type="number" defaultValue={s.quantity}
-                  onBlur={(e) => updateQty(s.id, e.target.value)}
-                  className="bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-2 py-1 w-24 text-sm" />
-                <span className="text-xs text-gray-500">pcs</span>
-                <button onClick={() => remove(s.id)} className="ml-auto text-red-400 text-sm">Remove</button>
-              </>
-            ) : (
-              <>
-                <span className="font-semibold w-16 text-gray-100">{s.size_label}</span>
-                <span className="text-gray-300">{s.quantity} pcs</span>
-              </>
-            )}
-          </div>
-        ))}
-        {sizes.length === 0 && <p className="text-gray-500 text-sm">No sizes added yet.</p>}
-      </div>
-      {canEdit && (
-        <form onSubmit={add} className="flex gap-2">
-          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Size (e.g. M)"
-            className="bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 flex-1 text-sm" />
-          <input value={qty} onChange={(e) => setQty(e.target.value)} type="number" placeholder="Qty"
-            className="bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 w-24 text-sm" />
-          <button className="bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-4 text-sm font-semibold">Add</button>
-        </form>
-      )}
-    </div>
-  )
-}
-
-function PhotosTab({ productId, photos, onChange, canEdit }) {
-  const [uploading, setUploading] = useState(false)
-
-  const upload = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-    setUploading(true)
-    try {
-      const url = await uploadPhoto(file, 'products')
-      await supabase.from('product_photos').insert({ product_id: productId, photo_url: url })
-      onChange()
-    } catch (err) {
-      alert('Upload failed: ' + err.message)
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  const remove = async (photoId) => {
-    await supabase.from('product_photos').delete().eq('id', photoId)
-    onChange()
-  }
-
-  return (
-    <div>
-      {canEdit && (
-        <label className="block bg-gray-900 border-2 border-dashed border-gray-700 rounded-xl p-4 text-center mb-4 text-sm text-brand-500 font-medium">
-          {uploading ? 'Uploading...' : '+ Add Photo'}
-          <input type="file" accept="image/*" onChange={upload} className="hidden" disabled={uploading} />
-        </label>
-      )}
-      <div className="grid grid-cols-3 gap-2">
-        {photos.map(p => (
-          <div key={p.id} className="relative aspect-square rounded-lg overflow-hidden bg-gray-800">
-            <img src={p.photo_url} className="w-full h-full object-cover" />
-            {canEdit && (
-              <button onClick={() => remove(p.id)}
-                className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-6 h-6 text-xs">✕</button>
-            )}
-          </div>
-        ))}
-      </div>
-      {photos.length === 0 && <p className="text-gray-500 text-sm">No extra photos yet.</p>}
-    </div>
-  )
-}
-
-function WorkTab({ logs, onChange, canEdit }) {
-  const [editingLog, setEditingLog] = useState(null)
-  const Row = canEdit ? 'button' : 'div'
-  return (
-    <div className="space-y-2">
-      {logs.map(l => (
-        <Row key={l.id} onClick={canEdit ? () => setEditingLog(l) : undefined}
-          className="w-full bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl p-3 flex gap-3 text-left">
-          {l.photo_url && <img src={l.photo_url} className="w-14 h-14 rounded-lg object-cover flex-shrink-0" />}
-          <div className="min-w-0">
-            <p className="font-semibold text-sm text-gray-100">{WORK_TYPE_LABEL[l.work_type] || l.work_type}</p>
-            <p className="text-xs text-gray-400">{l.employees?.name || 'Unassigned'} {l.quantity ? `· ${l.quantity} pcs` : ''}</p>
-            {l.notes && <p className="text-xs text-gray-500 mt-1">{l.notes}</p>}
-            <p className="text-[11px] text-gray-600 mt-1">{new Date(l.logged_at).toLocaleString()}</p>
-          </div>
-        </Row>
-      ))}
-      {logs.length === 0 && <p className="text-gray-500 text-sm">No work logged for this garment yet. Log it from the Work Log tab.</p>}
-      {canEdit && editingLog && <WorkLogEditModal log={editingLog} onClose={() => setEditingLog(null)} onSaved={() => { setEditingLog(null); onChange() }} />}
-    </div>
-  )
-}
-
-function WorkLogEditModal({ log, onClose, onSaved }) {
-  const [quantity, setQuantity] = useState(log.quantity || '')
-  const [notes, setNotes] = useState(log.notes || '')
-  const [saving, setSaving] = useState(false)
-
-  const save = async (e) => {
-    e.preventDefault()
-    setSaving(true)
-    try {
-      await supabase.from('work_logs').update({ quantity: Number(quantity) || null, notes: notes.trim() || null }).eq('id', log.id)
-      onSaved()
-    } catch (err) {
-      alert('Could not save: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const remove = async () => {
-    if (!confirm('Delete this work log entry?')) return
-    setSaving(true)
-    try {
-      await supabase.from('work_logs').delete().eq('id', log.id)
-      onSaved()
-    } catch (err) {
-      alert('Could not delete: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Modal onClose={onClose}>
-      <form onSubmit={save}>
-        <h3 className="text-lg font-bold mb-1 text-gray-100">{WORK_TYPE_LABEL[log.work_type] || log.work_type}</h3>
-        <p className="text-sm text-gray-400 mb-4">{log.employees?.name || 'Unassigned'}</p>
-        <label className={labelClass}>Quantity of pieces</label>
-        <input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} className={inputClass} />
-        <label className={labelClass}>Notes</label>
-        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className={inputClass} />
-        <FormActions onCancel={onClose} saving={saving} onDelete={remove} />
-      </form>
-    </Modal>
-  )
-}
-
-function SamplesTab({ productId, samples, onChange, canEdit }) {
-  const [showForm, setShowForm] = useState(false)
-  const [editing, setEditing] = useState(null)
-  const Row = canEdit ? 'button' : 'div'
-  return (
-    <div>
-      {canEdit && (
-        <button onClick={() => setShowForm(true)} className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 text-sm font-semibold mb-4">
-          + Log Sample Version
-        </button>
-      )}
-      <div className="space-y-3">
-        {samples.map(s => (
-          <Row key={s.id} onClick={canEdit ? () => setEditing(s) : undefined}
-            className="w-full bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl p-3 flex gap-3 text-left">
-            {s.photo_url && <img src={s.photo_url} className="w-16 h-16 rounded-lg object-cover flex-shrink-0" />}
-            <div className="min-w-0">
-              <p className="font-semibold text-sm text-gray-100">Version {s.version_number} <span className={`ml-2 text-[11px] px-2 py-0.5 rounded-full ${
-                s.status === 'approved' ? 'bg-green-900/50 text-green-300' :
-                s.status === 'rejected' ? 'bg-red-900/50 text-red-300' :
-                s.status === 'revising' ? 'bg-yellow-900/50 text-yellow-300' : 'bg-gray-800 text-gray-400'
-              }`}>{s.status}</span></p>
-              {s.change_description && <p className="text-xs text-gray-400 mt-1">{s.change_description}</p>}
-              <p className="text-[11px] text-gray-600 mt-1">{new Date(s.created_at).toLocaleDateString()}</p>
-            </div>
-          </Row>
-        ))}
-        {samples.length === 0 && <p className="text-gray-500 text-sm">No sample versions logged yet.</p>}
-      </div>
-      {canEdit && showForm && (
-        <SampleForm productId={productId} nextVersion={(samples[0]?.version_number || 0) + 1}
-          onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); onChange() }} />
-      )}
-      {canEdit && editing && (
-        <SampleForm productId={productId} sample={editing}
-          onClose={() => setEditing(null)} onSaved={() => { setEditing(null); onChange() }} />
-      )}
-    </div>
-  )
-}
-
-function SampleForm({ productId, sample, nextVersion, onClose, onSaved }) {
-  const isEdit = !!sample
-  const [desc, setDesc] = useState(sample?.change_description || '')
-  const [status, setStatus] = useState(sample?.status || 'pending')
-  const [file, setFile] = useState(null)
-  const [saving, setSaving] = useState(false)
-
-  const save = async (e) => {
-    e.preventDefault()
-    setSaving(true)
-    try {
-      let photo_url = sample?.photo_url || null
-      if (file) photo_url = await uploadPhoto(file, 'samples')
-      if (isEdit) {
-        await supabase.from('sample_versions').update({ change_description: desc.trim() || null, status, photo_url }).eq('id', sample.id)
-      } else {
-        await supabase.from('sample_versions').insert({
-          product_id: productId, version_number: nextVersion,
-          change_description: desc.trim() || null, status, photo_url,
-        })
-      }
-      onSaved()
-    } catch (err) {
-      alert('Could not save: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const remove = async () => {
-    if (!confirm(`Delete sample version ${sample.version_number}?`)) return
-    setSaving(true)
-    try {
-      await supabase.from('sample_versions').delete().eq('id', sample.id)
-      onSaved()
-    } catch (err) {
-      alert('Could not delete: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Modal onClose={onClose}>
-      <form onSubmit={save}>
-        <h3 className="text-lg font-bold mb-4 text-gray-100">{isEdit ? `Edit Version ${sample.version_number}` : `Log Sample Version ${nextVersion}`}</h3>
-        {sample?.photo_url && !file && <img src={sample.photo_url} className="w-full h-32 object-cover rounded-lg mb-2" />}
-        <label className={labelClass}>Photo of this version</label>
-        <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files[0])} className="w-full mb-3 text-sm text-gray-300" />
-        <label className={labelClass}>What changed</label>
-        <textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={3}
-          className={inputClass} placeholder="e.g. Collar width reduced, moved logo 1 inch left" />
-        <label className={labelClass}>Status</label>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass}>
-          <option value="pending">Pending brand approval</option>
-          <option value="approved">Approved</option>
-          <option value="rejected">Rejected</option>
-          <option value="revising">Revising</option>
-        </select>
-        <FormActions onCancel={onClose} saving={saving} onDelete={isEdit ? remove : null} />
       </form>
     </Modal>
   )
