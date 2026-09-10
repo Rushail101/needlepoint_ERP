@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
 import { inputClass, labelClass } from '../components/Modal.jsx'
 import { useAuth } from '../components/PinGate.jsx'
+import { sendTelegramMessage } from '../telegram.js'
 
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL']
 const SAMPLE_FEE_BASE = 5000
@@ -136,6 +137,7 @@ export default function NewOrder() {
     try {
       const finalBrandId = isClient ? user.brandId : (brandId || null)
       const cleanPo = poNumber.trim().toUpperCase() || null
+      const telegramLines = [] // built up as each garment is created, sent as one message at the end
 
       for (const it of items) {
         let finalPhoto = it.coverPhotoUrl || null
@@ -211,7 +213,22 @@ export default function NewOrder() {
           const { error: sErr } = await supabase.from('product_sizes').insert(sizeInserts)
           if (sErr) throw sErr
         }
+
+        const sizesText = validSizes.map((s) => `${s.size_label.trim().toUpperCase()}:${s.quantity}`).join(', ')
+        telegramLines.push(`• <b>${it.name.trim()}</b>${isSample ? ' 🧪 (sample)' : ''} — ${totalUnits} pcs${sizesText ? ` (${sizesText})` : ''}`)
       }
+
+      const brandName = brands.find((b) => b.id === finalBrandId)?.name || 'No brand'
+      const placedBy = isClient ? `${user.name || brandName} (client)` : (user?.name || 'Admin')
+      const summaryLines = [
+        `📦 <b>New Order Placed</b>`,
+        `Brand: ${brandName}`,
+        cleanPo ? `PO: ${cleanPo}` : null,
+        `Placed by: ${placedBy}`,
+        '',
+        ...telegramLines,
+      ].filter(Boolean)
+      sendTelegramMessage(summaryLines.join('\n'))
 
       navigate('/orders')
     } catch (err) {
