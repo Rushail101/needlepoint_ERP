@@ -5,6 +5,8 @@ import { inputClass, labelClass } from '../components/Modal.jsx'
 import { useAuth } from '../components/PinGate.jsx'
 
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL']
+const SAMPLE_FEE_BASE = 5000
+const SAMPLE_GST_RATE = 18
 
 export default function NewOrder() {
   const navigate = useNavigate()
@@ -167,10 +169,11 @@ export default function NewOrder() {
 
         const validSizes = it.sizes.filter((s) => parseInt(s.quantity, 10) > 0)
         const totalUnits = validSizes.reduce((sum, s) => sum + parseInt(s.quantity, 10), 0)
-        const rate = it.pricePerPiece ? Number(it.pricePerPiece) : null
-        const sub = rate && totalUnits > 0 ? rate * totalUnits : 0
-        const slab = Number(it.gstRate || 5)
-        const grand = sub > 0 ? Math.round(sub + (sub * slab) / 100) : null
+        const isSample = status === 'sampling'
+        const rate = isSample ? SAMPLE_FEE_BASE : (it.pricePerPiece ? Number(it.pricePerPiece) : null)
+        const sub = isSample ? SAMPLE_FEE_BASE : (rate && totalUnits > 0 ? rate * totalUnits : 0)
+        const slab = isSample ? SAMPLE_GST_RATE : Number(it.gstRate || 5)
+        const grand = isSample ? Math.round(SAMPLE_FEE_BASE * (1 + SAMPLE_GST_RATE / 100)) : (sub > 0 ? Math.round(sub + (sub * slab) / 100) : null)
 
         const productPayload = {
           name: it.name.trim(),
@@ -345,6 +348,15 @@ export default function NewOrder() {
               </div>
 
               {!isClient ? (
+                status === 'sampling' ? (
+                  <div className="bg-gray-950 border border-amber-800/60 rounded-xl px-3 py-2.5 flex items-center justify-between">
+                    <span className="text-xs text-amber-400 font-semibold">🧪 Sample Fee (fixed)</span>
+                    <span className="text-sm font-bold text-gray-100">
+                      ₹{SAMPLE_FEE_BASE.toLocaleString('en-IN')} + {SAMPLE_GST_RATE}% GST = ₹
+                      {Math.round(SAMPLE_FEE_BASE * (1 + SAMPLE_GST_RATE / 100)).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className={labelClass}>Price per piece (₹)</label>
@@ -376,6 +388,7 @@ export default function NewOrder() {
                     </select>
                   </div>
                 </div>
+                )
               ) : (
                 it.pricePerPiece && (
                   <div className="bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-xs flex justify-between items-center">
