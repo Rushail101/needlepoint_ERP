@@ -5,6 +5,7 @@ import { STAGES, stageInfo } from '../stages.js'
 import { WORK_TYPES, WORK_TYPE_LABEL } from '../workTypes.js'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
 import ShipmentModal from '../components/ShipmentModal.jsx'
+import OrderEditModal from '../components/OrderEditModal.jsx'
 import { exportProductPDF } from '../pdfExport.js'
 import { useAuth } from '../components/PinGate.jsx'
 import { can } from '../permissions.js'
@@ -324,7 +325,7 @@ export default function ProductDetail() {
       )}
 
       {showEdit && (
-        <EditProductModal
+        <OrderEditModal
           product={product}
           brands={brands}
           onClose={() => setShowEdit(false)}
@@ -535,4 +536,74 @@ function WorkLogsTab({ productId, logs, canLog, onOpenLogModal, onReload }) {
                 <span className="font-bold text-gray-200">{l.employees?.name || 'Unknown Tailor'}</span>
                 <span className="bg-gray-800 text-gray-300 px-2 py-0.5 rounded text-[11px]">
                   {WORK_TYPE_LABEL?.[l.work_type] || l.work_type}
-            
+                </span>
+                {l.quantity ? <span className="text-gray-400">· {l.quantity} pcs</span> : null}
+              </div>
+              {l.notes && <p className="text-gray-500 mt-1">{l.notes}</p>}
+              <p className="text-[10px] text-gray-600 mt-1">{new Date(l.created_at).toLocaleString()}</p>
+            </div>
+            {canLog && (
+              <button onClick={() => deleteLog(l.id)} className="text-gray-500 hover:text-red-400 text-[11px]">
+                Delete
+              </button>
+            )}
+          </div>
+        ))}
+        {logs.length === 0 && <p className="text-gray-500">No work logged for this order yet.</p>}
+      </div>
+    </div>
+  )
+}
+
+function LogWorkModal({ productId, employees, onClose, onSaved }) {
+  const [employeeId, setEmployeeId] = useState('')
+  const [workType, setWorkType] = useState(WORK_TYPES[0]?.key || 'stitching')
+  const [quantity, setQuantity] = useState('')
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const save = async (e) => {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      await supabase.from('work_logs').insert({
+        product_id: productId,
+        employee_id: employeeId || null,
+        work_type: workType,
+        quantity: quantity ? Number(quantity) : null,
+        notes: notes.trim() || null,
+      })
+      onSaved()
+    } catch (err) {
+      alert('Could not save: ' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <form onSubmit={save}>
+        <h3 className="text-lg font-bold mb-4 text-gray-100">Record Completed Work</h3>
+        <label className={labelClass}>Tailor / Worker</label>
+        <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={inputClass}>
+          <option value="">Unassigned</option>
+          {employees.map((emp) => (
+            <option key={emp.id} value={emp.id}>{emp.name}</option>
+          ))}
+        </select>
+        <label className={labelClass}>Work Type</label>
+        <select value={workType} onChange={(e) => setWorkType(e.target.value)} className={inputClass}>
+          {WORK_TYPES.map((w) => (
+            <option key={w.key} value={w.key}>{w.label}</option>
+          ))}
+        </select>
+        <label className={labelClass}>Quantity (pcs)</label>
+        <input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} className={inputClass} placeholder="optional" />
+        <label className={labelClass}>Notes</label>
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inputClass} placeholder="optional" />
+        <FormActions onCancel={onClose} saving={saving} />
+      </form>
+    </Modal>
+  )
+}
