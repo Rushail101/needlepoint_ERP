@@ -1,609 +1,509 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
-import { STAGES, stageInfo } from '../stages.js'
-import { WORK_TYPES, WORK_TYPE_LABEL } from '../workTypes.js'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
-import ShipmentModal from '../components/ShipmentModal.jsx'
 import OrderEditModal from '../components/OrderEditModal.jsx'
-import { exportProductPDF } from '../pdfExport.js'
+import { STAGES, stageInfo } from '../stages.js'
 import { useAuth } from '../components/PinGate.jsx'
 import { can } from '../permissions.js'
+import { exportBatchOrderPDF } from '../pdfExport.js'
 
-export default function ProductDetail() {
-  const { id } = useParams()
-  const navigate = useNavigate()
+const STATUS_LABEL = {
+  in_production: { text: 'In Production', color: 'bg-blue-900/50 text-blue-300' },
+  sampling: { text: 'Sampling', color: 'bg-yellow-900/50 text-yellow-300' },
+  completed: { text: 'Completed', color: 'bg-green-900/50 text-green-300' },
+  on_hold: { text: 'On Hold', color: 'bg-gray-800 text-gray-400' },
+}
+
+function generateConciseBatchSummary(batch, showFinancials = false) {
+  const brand = batch.brands?.name || 'Independent'
+  let subtotal = 0
+  let totalPieces = 0
+  let totalShippedCount = 0
+
+  const lines = batch.items.map((it, idx) => {
+    const qty = (it.product_sizes || []).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
+    const shippedQty = (it.shipments || []).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
+    totalPieces += qty
+    totalShippedCount += shippedQty
+
+    const rate = Number(it.price_per_piece || 0)
+    const lineTotal = it.total_amount != null ? Number(it.total_amount) : (rate * qty)
+    subtotal += (rate * qty)
+
+    const rateText = (showFinancials && rate > 0) ? ` @ ₹${rate.toLocaleString('en-IN')}/pc` : ''
+    const totalText = (showFinancials && lineTotal > 0) ? ` = ₹${lineTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : ''
+
+    let dispatchLine = ''
+    if (shippedQty > 0) {
+      const sizeBreakdown = (it.shipments || []).reduce((acc, s) => {
+        const key = s.size_label || 'Mixed'
+        acc[key] = (acc[key] || 0) + Number(s.quantity)
+        return acc
+      }, {})
+      const sizeStr = Object.entries(sizeBreakdown).map(([sz, count]) => `${sz}: ${count}`).join(', ')
+      dispatchLine = `\n   ↳ Dispatched: ${shippedQty} pcs (${sizeStr}) | Pending: ${Math.max(0, qty - shippedQty)} pcs`
+    }
+
+    return `${idx + 1}. *${it.name}* — ${qty} pcs${rateText}${totalText}${dispatchLine}`
+  }).join('\n')
+
+  const sampleItem = batch.items[0]
+  const gstRate = sampleItem?.gst_rate != null ? Number(sampleItem.gst_rate) : 5
+  const gstAmount = subtotal > 0 ? (subtotal * gstRate) / 100 : 0
+  const grandTotal = subtotal > 0 ? Math.round(subtotal + gstAmount) : 0
+
+  let totalsBlock = `*Total Volume:* ${totalPieces} pcs`
+  if (totalShippedCount > 0) {
+    totalsBlock += ` (${totalShippedCount} pcs dispatched, ${Math.max(0, totalPieces - totalShippedCount)} pcs pending)`
+  }
+
+  if (showFinancials && subtotal > 0) {
+    totalsBlock += `\n*Subtotal:* ₹${subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+*GST (${gstRate}%):* ₹${gstAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+*Grand Total:* ₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+  }
+
+  return `*NEEDLE POINT — ORDER RUN SUMMARY*
+*PO:* ${batch.po_number}
+*Brand:* ${brand}
+
+*Garments:*
+${lines}
+
+------------------------------
+${totalsBlock}`
+}
+
+export default function Orders() {
   const { user } = useAuth()
   const isClient = user?.role === 'client'
-
-  const canEdit = can(user, 'edit_garments')
-  const canLog = can(user, 'log_work')
+  const canCreate = can(user, 'create_orders')
   const showFinancials = can(user, 'view_financials')
 
-  const [product, setProduct] = useState(null)
-  const [sizes, setSizes] = useState([])
-  const [photos, setPhotos] = useState([])
-  const [logs, setLogs] = useState([])
-  const [employees, setEmployees] = useState([])
+  const [rawProducts, setRawProducts] = useState([])
   const [brands, setBrands] = useState([])
   const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState(null)
+  const [selectedBatch, setSelectedBatch] = useState(null)
+  const [filterBrand, setFilterBrand] = useState('')
+  const [search, setSearch] = useState('')
+  const [copied, setCopied] = useState(false)
 
-  const [activeTab, setActiveTab] = useState('sizes')
-  const [showEdit, setShowEdit] = useState(false)
-  const [showLogWork, setShowLogWork] = useState(false)
-  const [showQR, setShowQR] = useState(false)
-  const [showShipmentModal, setShowShipmentModal] = useState(false)
-
-  const loadProduct = async () => {
+  const load = async () => {
     setLoading(true)
     let prodQuery = supabase
       .from('products')
-      .select('*, brands(name), shipments(size_label, quantity, dispatched_at)')
-      .eq('id', id)
+      .select('*, brands(name), product_sizes(size_label, quantity), shipments(size_label, quantity, dispatched_at)')
+      .order('created_at', { ascending: false })
 
     if (isClient && user?.brandId) {
       prodQuery = prodQuery.eq('brand_id', user.brandId)
     }
 
-    const { data: prod, error } = await prodQuery.single()
-
-    if (error || !prod) {
-      alert('Order not found or permission denied.')
-      navigate('/orders')
-      return
-    }
-
-    const [{ data: sz }, { data: ph }, { data: lg }, { data: emps }, { data: brs }] = await Promise.all([
-      supabase.from('product_sizes').select('*').eq('product_id', id).order('size_label'),
-      supabase.from('product_photos').select('*').eq('product_id', id).order('created_at', { ascending: false }),
-      supabase.from('work_logs').select('*, employees(name)').eq('product_id', id).order('created_at', { ascending: false }),
-      supabase.from('employees').select('*').eq('active', true).order('name'),
-      supabase.from('brands').select('*').order('name'),
-    ])
-
-    setProduct(prod)
-    setSizes(sz || [])
-    setPhotos(ph || [])
-    setLogs(lg || [])
-    setEmployees(emps || [])
+    const { data: prods } = await prodQuery
+    const { data: brs } = await supabase.from('brands').select('*').order('name')
+    setRawProducts(prods || [])
     setBrands(brs || [])
     setLoading(false)
   }
 
-  useEffect(() => {
-    loadProduct()
-  }, [id, user?.brandId])
+  useEffect(() => { load() }, [user?.brandId])
 
-  const updateStage = async (newStage) => {
-    const { error } = await supabase.from('products').update({ stage: newStage }).eq('id', id)
-    if (error) {
-      alert('Error updating stage: ' + error.message)
-      return
+  const groupedOrders = (() => {
+    const groups = []
+    const poMap = new Map()
+
+    for (const p of rawProducts) {
+      if (p.po_number && p.po_number.trim() !== '') {
+        const key = `${p.brand_id || 'nobrand'}_${p.po_number.trim().toUpperCase()}`
+        if (!poMap.has(key)) {
+          const batch = {
+            isBatch: true,
+            id: key,
+            po_number: p.po_number.trim().toUpperCase(),
+            brand_id: p.brand_id,
+            brands: p.brands,
+            created_at: p.created_at,
+            items: [],
+          }
+          poMap.set(key, batch)
+          groups.push(batch)
+        }
+        poMap.get(key).items.push(p)
+      } else {
+        groups.push({ isBatch: false, ...p })
+      }
     }
-    setProduct((prev) => ({ ...prev, stage: newStage }))
-  }
 
-  const handleExportPDF = () => {
-    exportProductPDF({ product, sizes })
-  }
+    return groups.map(g => {
+      if (g.isBatch && g.items.length === 1) {
+        return { isBatch: false, ...g.items[0] }
+      }
+      return g
+    })
+  })()
 
-  if (loading || !product) {
-    return <div className="text-gray-400 text-center py-10">Loading garment details...</div>
-  }
+  const filtered = groupedOrders
+    .filter(g => (!isClient && filterBrand ? g.brand_id === filterBrand : true))
+    .filter(g => {
+      if (!search.trim()) return true
+      const q = search.trim().toLowerCase()
+      if (g.isBatch) {
+        return (
+          g.po_number?.toLowerCase().includes(q) ||
+          g.brands?.name?.toLowerCase().includes(q) ||
+          g.items.some(it => it.name?.toLowerCase().includes(q) || it.style_code?.toLowerCase().includes(q))
+        )
+      }
+      return (
+        g.name?.toLowerCase().includes(q) ||
+        g.style_code?.toLowerCase().includes(q) ||
+        g.brands?.name?.toLowerCase().includes(q) ||
+        g.po_number?.toLowerCase().includes(q)
+      )
+    })
+    .sort((a, b) => {
+      const isFinished = (item) => {
+        if (item.isBatch) {
+          return item.items.every(it => it.status === 'completed' || it.stage === 'packed' || it.status === 'on_hold')
+        }
+        return item.status === 'completed' || item.stage === 'packed' || item.status === 'on_hold'
+      }
 
-  const totalQty = sizes.reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
-  const totalShipped = (product.shipments || []).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
-  const logUrl = `${window.location.origin}/products/${product.id}`
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(logUrl)}`
+      const aDone = isFinished(a) ? 1 : 0
+      const bDone = isFinished(b) ? 1 : 0
+      if (aDone !== bDone) return aDone - bDone
+
+      return new Date(b.created_at) - new Date(a.created_at)
+    })
+
+  const handleCopySummary = async () => {
+    if (!selectedBatch) return
+    const text = generateConciseBatchSummary(selectedBatch, showFinancials)
+    await navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <Link to="/orders" className="text-brand-500 hover:text-brand-400 text-sm font-semibold flex items-center gap-1">
-          ← Back to Orders
-        </Link>
-      </div>
-
-      {/* Main Details Header Card */}
-      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 sm:p-5 relative">
-        <div className="flex flex-col sm:flex-row gap-4 sm:items-center justify-between">
-          <div className="flex gap-3.5 items-center min-w-0">
-            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-gray-800 border border-gray-700 overflow-hidden flex items-center justify-center flex-shrink-0">
-              {product.cover_photo_url ? (
-                <img src={product.cover_photo_url} alt={product.name} className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-3xl text-gray-600">👕</span>
-              )}
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-lg sm:text-2xl font-black text-gray-100 uppercase tracking-tight truncate">
-                {product.name}
-              </h1>
-              <p className="text-xs text-gray-400">
-                {product.brands?.name || 'Independent'}
-                {product.po_number && <span> · PO: <strong className="text-gray-300 font-mono">{product.po_number}</strong></span>}
-                {product.style_code && <span> · Style: <strong className="text-gray-300">{product.style_code}</strong></span>}
-              </p>
-              
-              <div className="flex flex-wrap items-center gap-2 mt-1">
-                <span className="text-xs font-semibold text-brand-400">Total qty: {totalQty}</span>
-                {totalShipped > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/60 text-emerald-400 font-semibold">
-                    🚚 {totalShipped}/{totalQty} shipped
-                  </span>
-                )}
-                {showFinancials && product.price_per_piece && (
-                  <span className="text-xs text-gray-300 font-medium">
-                    · ₹{Number(product.price_per_piece).toLocaleString('en-IN')}/pc
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
-            {canEdit && (
-              <button
-                onClick={() => setShowEdit(true)}
-                className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 rounded-xl px-3 py-1.5 text-xs font-semibold"
-              >
-                Edit
-              </button>
-            )}
-            
-            {/* Dispatch management available to internal staff & viewable by clients */}
-            {!isClient && (
-              <button
-                onClick={() => setShowShipmentModal(true)}
-                className="bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-800/70 text-emerald-300 rounded-xl px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5"
-              >
-                <span>🚚</span> Dispatches
-              </button>
-            )}
-
-            {product.tech_pack_url && (
-              <a
-                href={product.tech_pack_url}
-                target="_blank"
-                rel="noreferrer"
-                className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-brand-400 rounded-xl px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5"
-              >
-                <span>📄</span> Tech Pack
-              </a>
-            )}
-
-            <button
-              onClick={handleExportPDF}
-              className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 rounded-xl px-3 py-1.5 text-xs font-semibold flex items-center gap-1.5"
-            >
-              <span>📄</span> Export Job Sheet
-            </button>
-          </div>
+    <div>
+      <div className="flex items-center justify-between mb-4 gap-2">
+        <div>
+          <h2 className="text-xl font-bold text-gray-100">Orders</h2>
+          {isClient && <p className="text-xs text-brand-400 font-medium">Viewing production runs for {user.name}</p>}
         </div>
-
-        {/* Stage & QR Bar */}
-        <div className="mt-4 pt-3.5 border-t border-gray-800 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-gray-400">Stage:</span>
-            {!isClient && canEdit ? (
-              <select
-                value={product.stage || 'cutting'}
-                onChange={(e) => updateStage(e.target.value)}
-                className="bg-gray-950 border border-gray-700 text-gray-200 rounded-lg px-2.5 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-brand-500"
-              >
-                {STAGES.map((s) => (
-                  <option key={s.key} value={s.key}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${stageInfo(product.stage).color}`}>
-                {stageInfo(product.stage).label}
-              </span>
-            )}
-          </div>
-
-          {!isClient && (
-            <button
-              onClick={() => setShowQR(true)}
-              className="bg-gray-950 hover:bg-gray-800 border border-gray-800 text-gray-300 rounded-lg px-2.5 py-1 text-xs font-medium flex items-center gap-1.5"
-            >
-              <span>📱</span> Quick QR Login
-            </button>
-          )}
-        </div>
-
-        {product.planned_work?.length > 0 && (
-          <div className="mt-3 bg-gray-950/60 border border-gray-800/80 rounded-xl p-2.5 text-xs">
-            <span className="text-gray-500 uppercase tracking-wider text-[10px] font-bold mr-2">Planned Work:</span>
-            <div className="inline-flex flex-wrap gap-1.5 mt-1 sm:mt-0">
-              {product.planned_work.map((w, idx) => (
-                <span key={idx} className="bg-gray-800 text-gray-300 px-2 py-0.5 rounded-md text-[11px] font-medium">
-                  {w}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Tabs */}
-      <div className="flex border-b border-gray-800 text-sm gap-2">
-        <button
-          onClick={() => setActiveTab('sizes')}
-          className={`pb-2 px-3 font-semibold transition ${
-            activeTab === 'sizes' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-gray-400 hover:text-gray-200'
-          }`}
-        >
-          Sizes & Qty
-        </button>
-        <button
-          onClick={() => setActiveTab('photos')}
-          className={`pb-2 px-3 font-semibold transition ${
-            activeTab === 'photos' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-gray-400 hover:text-gray-200'
-          }`}
-        >
-          Photos ({photos.length})
-        </button>
-
-        {/* Tailor work logs are internal only */}
-        {!isClient && (
-          <button
-            onClick={() => setActiveTab('work')}
-            className={`pb-2 px-3 font-semibold transition ${
-              activeTab === 'work' ? 'text-brand-500 border-b-2 border-brand-500' : 'text-gray-400 hover:text-gray-200'
-            }`}
+        {canCreate && (
+          <Link
+            to="/orders/new"
+            className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm"
           >
-            Work History ({logs.length})
-          </button>
+            + Add Order
+          </Link>
         )}
       </div>
 
-      {activeTab === 'sizes' && (
-        <SizesTab
-          productId={product.id}
-          sizes={sizes}
-          canEdit={!isClient && canEdit}
-          onReload={loadProduct}
-        />
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search by garment, style code, or PO number..."
+        className="w-full bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+      />
+
+      {!isClient && brands.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto pb-3 mb-2">
+          <button
+            onClick={() => setFilterBrand('')}
+            className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${filterBrand === '' ? 'bg-brand-600 text-white' : 'bg-gray-800 border border-gray-700 text-gray-300'}`}
+          >
+            All Brands
+          </button>
+          {brands.map(b => (
+            <button
+              key={b.id}
+              onClick={() => setFilterBrand(b.id)}
+              className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${filterBrand === b.id ? 'bg-brand-600 text-white' : 'bg-gray-800 border border-gray-700 text-gray-300'}`}
+            >
+              {b.name}
+            </button>
+          ))}
+        </div>
       )}
 
-      {activeTab === 'photos' && (
-        <PhotosTab
-          productId={product.id}
-          photos={photos}
-          canEdit={!isClient && canEdit}
-          onReload={loadProduct}
-        />
+      {loading ? (
+        <p className="text-gray-500 text-center py-10">Loading orders...</p>
+      ) : filtered.length === 0 ? (
+        <p className="text-gray-500 text-center py-10">No orders found.</p>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+          {filtered.map((item) => {
+            if (item.isBatch) {
+              const batchQty = item.items.reduce((acc, p) => {
+                return acc + (p.product_sizes || []).reduce((qAcc, s) => qAcc + (Number(s.quantity) || 0), 0)
+              }, 0)
+
+              const batchShipped = item.items.reduce((acc, p) => {
+                return acc + (p.shipments || []).reduce((sAcc, s) => sAcc + (Number(s.quantity) || 0), 0)
+              }, 0)
+
+              const batchGrandTotal = item.items.reduce((acc, p) => {
+                if (p.total_amount != null) return acc + Number(p.total_amount)
+                const pQty = (p.product_sizes || []).reduce((qAcc, s) => qAcc + (Number(s.quantity) || 0), 0)
+                const pSub = p.price_per_piece ? Number(p.price_per_piece) * pQty : 0
+                return acc + (pSub > 0 ? Math.round(pSub + (pSub * (p.gst_rate ?? 5)) / 100) : 0)
+              }, 0)
+
+              const previews = item.items.slice(0, 4)
+
+              return (
+                <div
+                  key={item.id}
+                  onClick={() => setSelectedBatch(item)}
+                  className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-brand-500/60 transition cursor-pointer flex flex-col group relative"
+                >
+                  <div className="aspect-square bg-gray-950 p-1.5 grid grid-cols-2 gap-1 overflow-hidden relative">
+                    {previews.map((p, pIdx) => (
+                      <div key={p.id || pIdx} className="w-full h-full bg-gray-800 rounded overflow-hidden flex items-center justify-center">
+                        {p.cover_photo_url ? (
+                          <img src={p.cover_photo_url} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition" />
+                        ) : (
+                          <span className="text-sm text-gray-600">👕</span>
+                        )}
+                      </div>
+                    ))}
+                    {item.items.length > 4 && (
+                      <span className="absolute bottom-2 right-2 bg-black/80 text-white font-mono text-[10px] px-1.5 py-0.5 rounded backdrop-blur">
+                        +{item.items.length - 4} more
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="p-2.5 flex-1 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between gap-1 mb-0.5">
+                        <span className="text-xs font-mono font-bold text-brand-400 truncate">{item.po_number}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-950 border border-brand-800/60 text-brand-300 font-semibold">
+                          {item.items.length} Products
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-400 truncate">{item.brands?.name || 'Independent'}</p>
+                    </div>
+
+                    <div className="mt-2 pt-1.5 border-t border-gray-800 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="text-gray-400">{batchQty} pcs</span>
+                        {batchShipped > 0 && (
+                          <span className="ml-1 text-[10px] px-1 py-0.2 rounded bg-emerald-950/80 border border-emerald-800/60 text-emerald-400 font-medium">
+                            🚚 {batchShipped}
+                          </span>
+                        )}
+                      </div>
+                      {showFinancials && batchGrandTotal > 0 && (
+                        <span className="font-bold text-gray-100">
+                          ₹{batchGrandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            }
+
+            const p = item
+            const totalQty = (p.product_sizes || []).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
+            const totalShipped = (p.shipments || []).reduce((sum, s) => sum + (Number(s.quantity) || 0), 0)
+            const subtotal = p.price_per_piece && totalQty > 0 ? Number(p.price_per_piece) * totalQty : 0
+            const gstRate = p.gst_rate ?? 5
+            const calculatedTotal = subtotal > 0 ? Math.round(subtotal + (subtotal * gstRate) / 100) : 0
+            const grandTotal = p.total_amount != null ? Number(p.total_amount) : calculatedTotal
+
+            return (
+              <div key={p.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-gray-700 transition relative">
+                {!isClient && can(user, 'edit_garments') && (
+                  <button
+                    onClick={(e) => { e.preventDefault(); setEditing(p) }}
+                    className="absolute top-1.5 right-1.5 z-10 bg-black/60 hover:bg-black/80 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm"
+                    aria-label="Edit order"
+                  >
+                    ✎
+                  </button>
+                )}
+                <Link to={`/products/${p.id}`}>
+                  <div className="aspect-square bg-gray-800">
+                    {p.cover_photo_url ? (
+                      <img src={p.cover_photo_url} alt={p.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-4xl text-gray-600">👕</div>
+                    )}
+                  </div>
+                  <div className="p-2.5">
+                    <p className="font-semibold text-sm truncate text-gray-100">{p.name}</p>
+                    <p className="text-xs text-gray-400 truncate">{p.brands?.name || 'No brand'}</p>
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {p.status && (
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full ${STATUS_LABEL[p.status]?.color || 'bg-gray-800 text-gray-400'}`}>
+                          {STATUS_LABEL[p.status]?.text || p.status}
+                        </span>
+                      )}
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full ${stageInfo(p.stage).color}`}>
+                        {stageInfo(p.stage).label}
+                      </span>
+                    </div>
+
+                    <div className="mt-2 pt-1.5 border-t border-gray-800 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="text-gray-400">{totalQty} pcs</span>
+                        {totalShipped > 0 && (
+                          <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/60 text-emerald-400 font-medium">
+                            🚚 {totalShipped}
+                          </span>
+                        )}
+                      </div>
+                      {showFinancials && grandTotal > 0 && (
+                        <span className="font-semibold text-brand-400">
+                          ₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              </div>
+            )
+          })}
+        </div>
       )}
 
-      {!isClient && activeTab === 'work' && (
-        <WorkLogsTab
-          productId={product.id}
-          logs={logs}
-          canLog={canLog}
-          onOpenLogModal={() => setShowLogWork(true)}
-          onReload={loadProduct}
-        />
-      )}
-
-      {showShipmentModal && (
-        <ShipmentModal
-          product={product}
-          sizes={sizes}
-          onClose={() => setShowShipmentModal(false)}
-          onUpdated={loadProduct}
-        />
-      )}
-
-      {showQR && (
-        <Modal onClose={() => setShowQR(false)}>
-          <div className="text-center p-2">
-            <h3 className="text-lg font-bold text-gray-100">{product.name}</h3>
-            <p className="text-xs text-gray-400 mb-4">{product.po_number || 'Single Order'}</p>
-            <div className="w-56 h-56 mx-auto bg-white p-3 rounded-2xl flex items-center justify-center shadow-lg">
-              <img src={qrUrl} alt="Garment Log QR" className="w-full h-full" />
+      {/* BATCH DETAIL MODAL */}
+      {selectedBatch && (
+        <Modal onClose={() => setSelectedBatch(null)}>
+          <div className="mb-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-100">Order Run: {selectedBatch.po_number}</h3>
+              <span className="text-xs bg-brand-950 text-brand-300 border border-brand-800 px-2.5 py-1 rounded-full font-semibold">
+                {selectedBatch.items.length} Products
+              </span>
             </div>
-            <p className="text-xs text-gray-400 mt-4">
-              Scan with phone camera to update stages or record piece-rate tailor logs.
-            </p>
+            <p className="text-xs text-gray-400 mt-0.5">{selectedBatch.brands?.name || 'Independent'}</p>
           </div>
+
+          <div className="grid grid-cols-2 gap-2 mb-4">
+            <button
+              type="button"
+              onClick={handleCopySummary}
+              className="bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 rounded-xl py-2.5 px-3 text-xs font-semibold flex items-center justify-center gap-2 transition"
+            >
+              <span>{copied ? '✓' : '📋'}</span>
+              <span>{copied ? 'Summary Copied!' : 'Copy Summary'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => exportBatchOrderPDF({ batch: selectedBatch, brandName: selectedBatch.brands?.name })}
+              className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl py-2.5 px-3 text-xs font-semibold flex items-center justify-center gap-2 transition"
+            >
+              <span>📄</span>
+              <span>Print PDF</span>
+            </button>
+          </div>
+
+          <p className="text-xs text-gray-500 mb-2 font-medium">Garments in this order:</p>
+
+          <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+            {selectedBatch.items.map((prod) => {
+              const qty = (prod.product_sizes || []).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
+              const prodShipped = (prod.shipments || []).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
+
+              const shippedSizes = (prod.shipments || []).reduce((acc, s) => {
+                const key = s.size_label || 'Mixed'
+                acc[key] = (acc[key] || 0) + Number(s.quantity)
+                return acc
+              }, {})
+
+              const shippedBreakdown = Object.entries(shippedSizes)
+                .map(([sz, count]) => `${sz}: ${count}`)
+                .join(', ')
+
+              return (
+                <Link
+                  key={prod.id}
+                  to={`/products/${prod.id}`}
+                  className="flex items-center gap-3 p-2.5 rounded-xl bg-gray-950 border border-gray-800 hover:border-gray-700 transition"
+                >
+                  <div className="w-14 h-14 rounded-lg bg-gray-800 overflow-hidden flex-shrink-0 flex items-center justify-center">
+                    {prod.cover_photo_url ? (
+                      <img src={prod.cover_photo_url} alt={prod.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-xl text-gray-600">👕</span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-100 truncate">{prod.name}</p>
+                    <p className="text-xs text-gray-400">
+                      {prod.style_code ? `Style: ${prod.style_code} · ` : ''}{qty} pcs
+                    </p>
+                    
+                    {prodShipped > 0 ? (
+                      <div className="mt-1 flex items-center gap-1.5">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/60 text-emerald-400 font-medium">
+                          🚚 {prodShipped}/{qty} shipped{shippedBreakdown ? ` (${shippedBreakdown})` : ''}
+                        </span>
+                      </div>
+                    ) : (
+                      showFinancials && prod.price_per_piece != null && (
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          ₹{Number(prod.price_per_piece).toLocaleString('en-IN')}/pc
+                        </p>
+                      )
+                    )}
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+
+          {showFinancials && (() => {
+            const subtotal = selectedBatch.items.reduce((acc, p) => {
+              const qty = (p.product_sizes || []).reduce((s2, sz) => s2 + (Number(sz.quantity) || 0), 0)
+              return acc + (p.price_per_piece ? Number(p.price_per_piece) * qty : 0)
+            }, 0)
+            const gstRate = selectedBatch.items[0]?.gst_rate ?? 5
+            const grandTotal = selectedBatch.items.reduce((acc, p) => {
+              if (p.total_amount != null) return acc + Number(p.total_amount)
+              const qty = (p.product_sizes || []).reduce((s2, sz) => s2 + (Number(sz.quantity) || 0), 0)
+              const sub = p.price_per_piece ? Number(p.price_per_piece) * qty : 0
+              return acc + (sub > 0 ? Math.round(sub + (sub * (p.gst_rate ?? 5)) / 100) : 0)
+            }, 0)
+
+            if (subtotal <= 0) return null
+            return (
+              <div className="mt-4 pt-3 border-t border-gray-800 text-xs space-y-1">
+                <div className="flex justify-between text-gray-400">
+                  <span>Subtotal</span>
+                  <span>₹{subtotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                </div>
+                <div className="flex justify-between text-gray-400">
+                  <span>GST ({gstRate}%)</span>
+                  <span>₹{Math.round(grandTotal - subtotal).toLocaleString('en-IN')}</span>
+                </div>
+                <div className="flex justify-between text-gray-100 font-bold text-sm pt-1">
+                  <span>Grand Total</span>
+                  <span>₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                </div>
+              </div>
+            )
+          })()}
         </Modal>
       )}
 
-      {showLogWork && (
-        <LogWorkModal
-          productId={product.id}
-          employees={employees}
-          onClose={() => setShowLogWork(false)}
-          onSaved={() => {
-            setShowLogWork(false)
-            loadProduct()
-          }}
-        />
-      )}
-
-      {showEdit && (
+      {editing && (
         <OrderEditModal
-          product={product}
+          product={editing}
           brands={brands}
-          onClose={() => setShowEdit(false)}
-          onSaved={() => {
-            setShowEdit(false)
-            loadProduct()
-          }}
-          onDeleted={() => {
-            setShowEdit(false)
-            navigate('/orders')
-          }}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load() }}
+          onDeleted={() => { setEditing(null); load() }}
         />
       )}
     </div>
-  )
-}
-
-function SizesTab({ productId, sizes, canEdit, onReload }) {
-  const [sizeList, setSizeList] = useState(sizes)
-  const [newLabel, setNewLabel] = useState('')
-  const [newQty, setNewQty] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    setSizeList(sizes)
-  }, [sizes])
-
-  const updateQuantity = async (sizeId, qty) => {
-    const validQty = Math.max(0, parseInt(qty, 10) || 0)
-    await supabase.from('product_sizes').update({ quantity: validQty }).eq('id', sizeId)
-    onReload()
-  }
-
-  const addSize = async (e) => {
-    e.preventDefault()
-    if (!newLabel.trim()) return
-    setSaving(true)
-    try {
-      await supabase.from('product_sizes').insert({
-        product_id: productId,
-        size_label: newLabel.trim().toUpperCase(),
-        quantity: parseInt(newQty, 10) || 0,
-      })
-      setNewLabel('')
-      setNewQty('')
-      onReload()
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const removeSize = async (sizeId) => {
-    if (!confirm('Remove this size?')) return
-    await supabase.from('product_sizes').delete().eq('id', sizeId)
-    onReload()
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="space-y-2">
-        {sizeList.map((s) => (
-          <div
-            key={s.id}
-            className="flex items-center justify-between bg-gray-900 border border-gray-800 rounded-xl px-4 py-2.5"
-          >
-            <span className="font-bold text-gray-200 text-sm w-16">{s.size_label}</span>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                disabled={!canEdit}
-                value={s.quantity}
-                onChange={(e) => {
-                  const val = e.target.value
-                  setSizeList((prev) => prev.map((item) => (item.id === s.id ? { ...item, quantity: val } : item)))
-                }}
-                onBlur={(e) => updateQuantity(s.id, e.target.value)}
-                className={`w-20 bg-gray-950 border border-gray-700 text-gray-100 rounded-lg px-2.5 py-1 text-right text-sm font-semibold focus:outline-none focus:ring-1 focus:ring-brand-500 ${
-                  !canEdit ? 'cursor-not-allowed text-gray-400' : ''
-                }`}
-              />
-              <span className="text-xs text-gray-400">pcs</span>
-              {canEdit && (
-                <button
-                  onClick={() => removeSize(s.id)}
-                  className="text-xs text-gray-500 hover:text-red-400 ml-3"
-                >
-                  Remove
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {canEdit && (
-        <form onSubmit={addSize} className="flex gap-2 pt-2">
-          <input
-            placeholder="Size (e.g. 2XL)"
-            value={newLabel}
-            onChange={(e) => setNewLabel(e.target.value)}
-            className="w-28 bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-xs text-gray-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
-          />
-          <input
-            type="number"
-            placeholder="Qty"
-            value={newQty}
-            onChange={(e) => setNewQty(e.target.value)}
-            className="w-24 bg-gray-950 border border-gray-800 rounded-xl px-3 py-2 text-xs text-gray-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
-          />
-          <button
-            type="submit"
-            disabled={saving}
-            className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 text-xs font-semibold"
-          >
-            + Add Size
-          </button>
-        </form>
-      )}
-    </div>
-  )
-}
-
-function PhotosTab({ productId, photos, canEdit, onReload }) {
-  const [uploading, setUploading] = useState(false)
-
-  const handleUpload = async (e) => {
-    const files = Array.from(e.target.files || [])
-    if (!files.length) return
-    setUploading(true)
-    try {
-      for (const file of files) {
-        const url = await uploadPhoto(file, 'products')
-        await supabase.from('product_photos').insert({ product_id: productId, photo_url: url })
-      }
-      onReload()
-    } catch (err) {
-      alert('Upload failed: ' + err.message)
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  const removePhoto = async (photoId) => {
-    if (!confirm('Delete photo?')) return
-    await supabase.from('product_photos').delete().eq('id', photoId)
-    onReload()
-  }
-
-  return (
-    <div className="space-y-4">
-      {canEdit && (
-        <div>
-          <label className="inline-block bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 text-xs font-semibold cursor-pointer">
-            {uploading ? 'Uploading...' : '+ Upload Photos'}
-            <input type="file" multiple accept="image/*" onChange={handleUpload} className="hidden" disabled={uploading} />
-          </label>
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-        {photos.map((p) => (
-          <div key={p.id} className="aspect-square rounded-xl bg-gray-900 border border-gray-800 overflow-hidden relative group">
-            <img src={p.photo_url} alt="" className="w-full h-full object-cover" />
-            {canEdit && (
-              <button
-                onClick={() => removePhoto(p.id)}
-                className="absolute top-2 right-2 bg-black/70 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition"
-              >
-                ✕
-              </button>
-            )}
-          </div>
-        ))}
-        {photos.length === 0 && <p className="text-xs text-gray-500">No additional photos uploaded yet.</p>}
-      </div>
-    </div>
-  )
-}
-
-function WorkLogsTab({ productId, logs, canLog, onOpenLogModal, onReload }) {
-  const deleteLog = async (logId) => {
-    if (!confirm('Delete this work log entry?')) return
-    await supabase.from('work_logs').delete().eq('id', logId)
-    onReload()
-  }
-
-  return (
-    <div className="space-y-3">
-      {canLog && (
-        <div>
-          <button
-            onClick={onOpenLogModal}
-            className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 text-xs font-semibold"
-          >
-            + Record Completed Work
-          </button>
-        </div>
-      )}
-
-      <div className="space-y-2">
-        {logs.map((l) => (
-          <div
-            key={l.id}
-            className="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between text-xs"
-          >
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-gray-200">{l.employees?.name || 'Unknown Tailor'}</span>
-                <span className="bg-gray-800 text-gray-300 px-2 py-0.5 rounded text-[11px]">
-                  {WORK_TYPE_LABEL?.[l.work_type] || l.work_type}
-                </span>
-                {l.quantity ? <span className="text-gray-400">· {l.quantity} pcs</span> : null}
-              </div>
-              {l.notes && <p className="text-gray-500 mt-1">{l.notes}</p>}
-              <p className="text-[10px] text-gray-600 mt-1">{new Date(l.created_at).toLocaleString()}</p>
-            </div>
-            {canLog && (
-              <button onClick={() => deleteLog(l.id)} className="text-gray-500 hover:text-red-400 text-[11px]">
-                Delete
-              </button>
-            )}
-          </div>
-        ))}
-        {logs.length === 0 && <p className="text-gray-500">No work logged for this order yet.</p>}
-      </div>
-    </div>
-  )
-}
-
-function LogWorkModal({ productId, employees, onClose, onSaved }) {
-  const [employeeId, setEmployeeId] = useState('')
-  const [workType, setWorkType] = useState(WORK_TYPES[0]?.key || 'stitching')
-  const [quantity, setQuantity] = useState('')
-  const [notes, setNotes] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  const save = async (e) => {
-    e.preventDefault()
-    setSaving(true)
-    try {
-      await supabase.from('work_logs').insert({
-        product_id: productId,
-        employee_id: employeeId || null,
-        work_type: workType,
-        quantity: quantity ? Number(quantity) : null,
-        notes: notes.trim() || null,
-      })
-      onSaved()
-    } catch (err) {
-      alert('Could not save: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Modal onClose={onClose}>
-      <form onSubmit={save}>
-        <h3 className="text-lg font-bold mb-4 text-gray-100">Record Completed Work</h3>
-        <label className={labelClass}>Tailor / Worker</label>
-        <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={inputClass}>
-          <option value="">Unassigned</option>
-          {employees.map((emp) => (
-            <option key={emp.id} value={emp.id}>{emp.name}</option>
-          ))}
-        </select>
-        <label className={labelClass}>Work Type</label>
-        <select value={workType} onChange={(e) => setWorkType(e.target.value)} className={inputClass}>
-          {WORK_TYPES.map((w) => (
-            <option key={w.key} value={w.key}>{w.label}</option>
-          ))}
-        </select>
-        <label className={labelClass}>Quantity (pcs)</label>
-        <input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} className={inputClass} placeholder="optional" />
-        <label className={labelClass}>Notes</label>
-        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inputClass} placeholder="optional" />
-        <FormActions onCancel={onClose} saving={saving} />
-      </form>
-    </Modal>
   )
 }
