@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
 import Modal, { FormActions, inputClass, labelClass } from './Modal.jsx'
+import { sendTelegramMessage } from '../telegram.js'
 
 // Fixed sample pricing rule: every sample is a flat ₹5,000 + 18% GST = ₹5,900,
 // regardless of quantity. Production orders keep a normal price-per-piece × GST slab.
@@ -47,6 +48,9 @@ export default function OrderEditModal({ product, brands, onClose, onSaved, onDe
       let tech_pack_url = product.tech_pack_url || null
       if (pdfFile) tech_pack_url = await uploadPhoto(pdfFile, 'garments')
 
+      const finalPrice = isSample ? SAMPLE_FEE_BASE : (pricePerPiece ? Number(pricePerPiece) : null)
+      const finalGst = isSample ? SAMPLE_GST_RATE : Number(gstRate)
+
       const payload = {
         name: name.trim(),
         style_code: styleCode.trim() || null,
@@ -55,12 +59,56 @@ export default function OrderEditModal({ product, brands, onClose, onSaved, onDe
         status,
         cover_photo_url,
         tech_pack_url,
-        price_per_piece: isSample ? SAMPLE_FEE_BASE : (pricePerPiece ? Number(pricePerPiece) : null),
-        gst_rate: isSample ? SAMPLE_GST_RATE : Number(gstRate),
+        price_per_piece: finalPrice,
+        gst_rate: finalGst,
         total_amount: previewTotal,
       }
+
       const { error: err } = await supabase.from('products').update(payload).eq('id', product.id)
       if (err) throw err
+
+      // Compile change log for Telegram notification
+      const changes = []
+      if (product.name !== payload.name) {
+        changes.push(`• <b>Name:</b> <s>${product.name || 'None'}</s> ➔ <b>${payload.name}</b>`)
+      }
+      if ((product.style_code || '') !== (payload.style_code || '')) {
+        changes.push(`• <b>Style Code:</b> <s>${product.style_code || 'None'}</s> ➔ <b>${payload.style_code || 'None'}</b>`)
+      }
+      if ((product.brand_id || '') !== (payload.brand_id || '')) {
+        const oldBrand = brands.find((b) => b.id === product.brand_id)?.name || 'None'
+        const newBrand = brands.find((b) => b.id === payload.brand_id)?.name || 'None'
+        changes.push(`• <b>Brand:</b> <s>${oldBrand}</s> ➔ <b>${newBrand}</b>`)
+      }
+      if ((product.po_number || '') !== (payload.po_number || '')) {
+        changes.push(`• <b>PO Number:</b> <s>${product.po_number || 'None'}</s> ➔ <b>${payload.po_number || 'None'}</b>`)
+      }
+      if (product.status !== payload.status) {
+        changes.push(`• <b>Status:</b> <s>${product.status || 'None'}</s> ➔ <b>${payload.status}</b>`)
+      }
+      if (Number(product.price_per_piece || 0) !== Number(payload.price_per_piece || 0)) {
+        changes.push(`• <b>Price:</b> <s>₹${product.price_per_piece ?? 0}</s> ➔ <b>₹${payload.price_per_piece ?? 0}</b>`)
+      }
+      if (file) changes.push(`• <b>Cover Photo:</b> Updated`)
+      if (pdfFile) changes.push(`• <b>Tech Pack:</b> Updated`)
+
+      if (changes.length > 0) {
+        const brandName = brands.find((b) => b.id === (payload.brand_id || product.brand_id))?.name || 'No Brand'
+        const telegramMessage = [
+          `✏️ <b>GARMENT / ORDER UPDATED</b>`,
+          `━━━━━━━━━━━━━━━━━━━━`,
+          `<b>Garment:</b> ${payload.name}`,
+          `<b>Brand:</b> ${brandName}`,
+          `<b>Style Code:</b> ${payload.style_code || 'N/A'}`,
+          `<b>PO Number:</b> ${payload.po_number || 'N/A'}`,
+          ``,
+          `<b>Modifications:</b>`,
+          changes.join('\n'),
+        ].join('\n')
+
+        sendTelegramMessage(telegramMessage)
+      }
+
       onSaved()
     } catch (err) {
       setError(err.message)
@@ -74,6 +122,19 @@ export default function OrderEditModal({ product, brands, onClose, onSaved, onDe
     setSaving(true)
     try {
       await supabase.from('products').delete().eq('id', product.id)
+      
+      const brandName = brands.find((b) => b.id === product.brand_id)?.name || 'No Brand'
+      const deleteMessage = [
+        `🗑️ <b>GARMENT / ORDER DELETED</b>`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        `<b>Garment:</b> ${product.name}`,
+        `<b>Brand:</b> ${brandName}`,
+        `<b>Style Code:</b> ${product.style_code || 'N/A'}`,
+        `<b>PO Number:</b> ${product.po_number || 'N/A'}`,
+      ].join('\n')
+      
+      sendTelegramMessage(deleteMessage)
+
       onDeleted()
     } catch (err) {
       alert('Could not delete: ' + err.message)
