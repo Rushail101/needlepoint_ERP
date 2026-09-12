@@ -65,6 +65,10 @@ export default function NewOrder() {
     loadPrerequisites()
   }, [isClient, user?.brandId])
 
+  // Filter garments strictly belonging to the currently selected brand
+  const currentBrandId = isClient ? user?.brandId : brandId
+  const availableGarments = savedGarments.filter((g) => g.brand_id === currentBrandId)
+
   const pickGarment = (idx, gId) => {
     const g = savedGarments.find((x) => x.id === gId)
     setItems((prev) =>
@@ -126,18 +130,23 @@ export default function NewOrder() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (!currentBrandId) {
+      alert('Please select a client brand.')
+      return
+    }
+
     for (const it of items) {
       if (!it.name.trim()) {
-        alert('Please provide a name for all garments in this order.')
+        alert('Please provide a name or select a style for all garments.')
         return
       }
     }
 
     setSubmitting(true)
     try {
-      const finalBrandId = isClient ? user.brandId : (brandId || null)
+      const finalBrandId = currentBrandId
       const cleanPo = poNumber.trim().toUpperCase() || null
-      const telegramLines = [] // built up as each garment is created, sent as one message at the end
+      const telegramLines = []
 
       for (const it of items) {
         let finalPhoto = it.coverPhotoUrl || null
@@ -222,10 +231,12 @@ export default function NewOrder() {
       const placedBy = isClient ? `${user.name || brandName} (client)` : (user?.name || 'Admin')
       const summaryLines = [
         `📦 <b>New Order Placed</b>`,
-        `Brand: ${brandName}`,
-        cleanPo ? `PO: ${cleanPo}` : null,
-        `Placed by: ${placedBy}`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        `<b>Brand:</b> ${brandName}`,
+        cleanPo ? `<b>PO:</b> ${cleanPo}` : null,
+        `<b>Placed by:</b> ${placedBy}`,
         '',
+        `<b>Garments:</b>`,
         ...telegramLines,
       ].filter(Boolean)
       sendTelegramMessage(summaryLines.join('\n'))
@@ -258,13 +269,17 @@ export default function NewOrder() {
             {isClient ? (
               <input
                 disabled
-                value={user.name}
+                value={user?.name || 'My Brand'}
                 className="w-full bg-gray-950 border border-gray-800 text-gray-400 rounded-xl px-3 py-2 text-sm font-semibold cursor-not-allowed"
               />
             ) : (
               <select
                 value={brandId}
-                onChange={(e) => setBrandId(e.target.value)}
+                onChange={(e) => {
+                  setBrandId(e.target.value)
+                  // Reset picked catalog items if brand changes
+                  setItems((prev) => prev.map((item) => ({ ...item, pickedGarmentId: '' })))
+                }}
                 className={inputClass}
                 required
               >
@@ -302,7 +317,7 @@ export default function NewOrder() {
 
         <div className="space-y-4">
           {items.map((it, idx) => (
-            <div key={it.id} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 sm:p-5 relative space-y-3">
+            <div key={it.id} className="bg-gray-900 border border-gray-800 rounded-2xl p-4 sm:p-5 relative space-y-4">
               <div className="flex items-center justify-between border-b border-gray-800 pb-2">
                 <span className="text-xs uppercase font-bold text-brand-400 tracking-wider">
                   Garment #{idx + 1}
@@ -318,24 +333,82 @@ export default function NewOrder() {
                 )}
               </div>
 
-              {savedGarments.length > 0 && (
-                <div>
-                  <label className={labelClass}>Pick Existing Style from Catalog</label>
-                  <select
-                    value={it.pickedGarmentId}
-                    onChange={(e) => pickGarment(idx, e.target.value)}
-                    className={inputClass}
-                  >
-                    <option value="">Custom / New Garment</option>
-                    {savedGarments.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.name} {g.style_code ? `(${g.style_code})` : ''}
-                      </option>
-                    ))}
-                  </select>
+              {/* Visual Card Selector for Brand Styles */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className={labelClass}>
+                    {currentBrandId ? 'Select Catalog Style or Enter Custom' : 'Select a Brand Above First'}
+                  </label>
+                  {it.pickedGarmentId && (
+                    <button
+                      type="button"
+                      onClick={() => pickGarment(idx, '')}
+                      className="text-xs text-brand-400 hover:text-brand-300 font-medium"
+                    >
+                      Clear & Use Custom
+                    </button>
+                  )}
                 </div>
-              )}
 
+                {availableGarments.length > 0 ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2.5 max-h-56 overflow-y-auto p-1.5 bg-gray-950/60 rounded-xl border border-gray-800">
+                    {availableGarments.map((g) => {
+                      const isSelected = it.pickedGarmentId === g.id
+                      return (
+                        <div
+                          key={g.id}
+                          onClick={() => pickGarment(idx, isSelected ? '' : g.id)}
+                          className={`group cursor-pointer rounded-xl border overflow-hidden transition-all flex flex-col bg-gray-900 ${
+                            isSelected
+                              ? 'border-brand-500 ring-2 ring-brand-500/40'
+                              : 'border-gray-800 hover:border-gray-700'
+                          }`}
+                        >
+                          <div className="w-full aspect-[4/5] bg-gray-950 overflow-hidden relative">
+                            {g.cover_photo_url ? (
+                              <img
+                                src={g.cover_photo_url}
+                                alt={g.name}
+                                className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-xs text-gray-600 font-mono">
+                                No photo
+                              </div>
+                            )}
+                            {isSelected && (
+                              <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-brand-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold shadow">
+                                ✓
+                              </div>
+                            )}
+                          </div>
+                          <div className="p-2 flex flex-col justify-between flex-1">
+                            <div>
+                              <p className="text-[11px] font-bold text-gray-100 truncate leading-tight">
+                                {g.name}
+                              </p>
+                              <p className="text-[10px] text-gray-400 truncate">
+                                {g.style_code || 'No code'}
+                              </p>
+                            </div>
+                            <p className="text-[9px] text-brand-400 mt-1 font-mono">
+                              {g.default_price_per_piece ? `₹${g.default_price_per_piece}/pc` : 'Rate pending'}
+                            </p>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500 italic py-1">
+                    {currentBrandId
+                      ? 'No reusable catalog items found for this brand. Fill in details below to create one.'
+                      : 'Select a client brand above to view their catalog styles.'}
+                  </p>
+                )}
+              </div>
+
+              {/* Garment Inputs */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className={labelClass}>Garment Name*</label>
@@ -374,37 +447,37 @@ export default function NewOrder() {
                     </span>
                   </div>
                 ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className={labelClass}>Price per piece (₹)</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={it.pricePerPiece}
-                      onChange={(e) => {
-                        const v = e.target.value.replace(/[^0-9.]/g, '')
-                        setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, pricePerPiece: v } : x)))
-                      }}
-                      placeholder="Rate before GST"
-                      className={inputClass}
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelClass}>Price per piece (₹)</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={it.pricePerPiece}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/[^0-9.]/g, '')
+                          setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, pricePerPiece: v } : x)))
+                        }}
+                        placeholder="Rate before GST"
+                        className={inputClass}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass}>GST Slab</label>
+                      <select
+                        value={it.gstRate}
+                        onChange={(e) => {
+                          const v = Number(e.target.value)
+                          setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, gstRate: v } : x)))
+                        }}
+                        className={inputClass}
+                      >
+                        <option value={0}>0%</option>
+                        <option value={5}>5%</option>
+                        <option value={18}>18%</option>
+                      </select>
+                    </div>
                   </div>
-                  <div>
-                    <label className={labelClass}>GST Slab</label>
-                    <select
-                      value={it.gstRate}
-                      onChange={(e) => {
-                        const v = Number(e.target.value)
-                        setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, gstRate: v } : x)))
-                      }}
-                      className={inputClass}
-                    >
-                      <option value={0}>0%</option>
-                      <option value={5}>5%</option>
-                      <option value={18}>18%</option>
-                    </select>
-                  </div>
-                </div>
                 )
               ) : (
                 it.pricePerPiece && (
