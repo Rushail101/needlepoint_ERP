@@ -4,6 +4,7 @@ import { supabase, uploadPhoto } from '../supabaseClient.js'
 import { inputClass, labelClass } from '../components/Modal.jsx'
 import { useAuth } from '../components/PinGate.jsx'
 import { sendTelegramMessage } from '../telegram.js'
+import { buildBatchSummaryText } from '../orderSummary.js'
 
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL']
 const SAMPLE_FEE_BASE = 5000
@@ -65,7 +66,6 @@ export default function NewOrder() {
     loadPrerequisites()
   }, [isClient, user?.brandId])
 
-  // Filter garments strictly belonging to the currently selected brand
   const currentBrandId = isClient ? user?.brandId : brandId
   const availableGarments = savedGarments.filter((g) => g.brand_id === currentBrandId)
 
@@ -137,7 +137,7 @@ export default function NewOrder() {
 
     for (const it of items) {
       if (!it.name.trim()) {
-        alert('Please provide a name or select a style for all garments.')
+        alert('Please provide a name for all garments in this order.')
         return
       }
     }
@@ -146,7 +146,6 @@ export default function NewOrder() {
     try {
       const finalBrandId = currentBrandId
       const cleanPo = poNumber.trim().toUpperCase() || null
-      const telegramLines = []
 
       for (const it of items) {
         let finalPhoto = it.coverPhotoUrl || null
@@ -184,7 +183,9 @@ export default function NewOrder() {
         const rate = isSample ? SAMPLE_FEE_BASE : (it.pricePerPiece ? Number(it.pricePerPiece) : null)
         const sub = isSample ? SAMPLE_FEE_BASE : (rate && totalUnits > 0 ? rate * totalUnits : 0)
         const slab = isSample ? SAMPLE_GST_RATE : Number(it.gstRate || 5)
-        const grand = isSample ? Math.round(SAMPLE_FEE_BASE * (1 + SAMPLE_GST_RATE / 100)) : (sub > 0 ? Math.round(sub + (sub * slab) / 100) : null)
+        const grand = isSample
+          ? Math.round(SAMPLE_FEE_BASE * (1 + SAMPLE_GST_RATE / 100))
+          : (sub > 0 ? Math.round(sub + (sub * slab) / 100) : null)
 
         const productPayload = {
           name: it.name.trim(),
@@ -208,10 +209,7 @@ export default function NewOrder() {
           .select()
           .single()
 
-        if (pErr) {
-          console.error('Supabase Product Insert Error:', pErr)
-          throw new Error(pErr.message || 'Error creating product record')
-        }
+        if (pErr) throw new Error(pErr.message || 'Error creating product record')
 
         if (validSizes.length > 0) {
           const sizeInserts = validSizes.map((s) => ({
@@ -222,24 +220,34 @@ export default function NewOrder() {
           const { error: sErr } = await supabase.from('product_sizes').insert(sizeInserts)
           if (sErr) throw sErr
         }
-
-        const sizesText = validSizes.map((s) => `${s.size_label.trim().toUpperCase()}:${s.quantity}`).join(', ')
-        telegramLines.push(`• <b>${it.name.trim()}</b>${isSample ? ' 🧪 (sample)' : ''} — ${totalUnits} pcs${sizesText ? ` (${sizesText})` : ''}`)
       }
 
-      const brandName = brands.find((b) => b.id === finalBrandId)?.name || 'No brand'
-      const placedBy = isClient ? `${user.name || brandName} (client)` : (user?.name || 'Admin')
-      const summaryLines = [
-        `📦 <b>New Order Placed</b>`,
-        `━━━━━━━━━━━━━━━━━━━━`,
-        `<b>Brand:</b> ${brandName}`,
-        cleanPo ? `<b>PO:</b> ${cleanPo}` : null,
-        `<b>Placed by:</b> ${placedBy}`,
-        '',
-        `<b>Garments:</b>`,
-        ...telegramLines,
-      ].filter(Boolean)
-      sendTelegramMessage(summaryLines.join('\n'))
+      const brandName = brands.find((b) => b.id === finalBrandId)?.name || 'Independent'
+      const batchData = {
+        po_number: cleanPo || 'N/A',
+        items: items.map((it) => {
+          const validSizes = it.sizes.filter((s) => parseInt(s.quantity, 10) > 0)
+          const totalUnits = validSizes.reduce((sum, s) => sum + parseInt(s.quantity, 10), 0)
+          const isSample = status === 'sampling'
+          const rate = isSample ? SAMPLE_FEE_BASE : (it.pricePerPiece ? Number(it.pricePerPiece) : null)
+          const sub = isSample ? SAMPLE_FEE_BASE : (rate && totalUnits > 0 ? rate * totalUnits : 0)
+          const slab = isSample ? SAMPLE_GST_RATE : Number(it.gstRate || 5)
+          const grand = isSample
+            ? Math.round(SAMPLE_FEE_BASE * (1 + SAMPLE_GST_RATE / 100))
+            : (sub > 0 ? Math.round(sub + (sub * slab) / 100) : null)
+
+          return {
+            name: it.name.trim(),
+            total_amount: grand,
+            price_per_piece: rate,
+            gst_rate: slab,
+            product_sizes: validSizes,
+          }
+        }),
+      }
+
+      const summaryText = buildBatchSummaryText({ batch: batchData, brandName })
+      sendTelegramMessage(summaryText, 'Markdown')
 
       navigate('/orders')
     } catch (err) {
@@ -277,7 +285,6 @@ export default function NewOrder() {
                 value={brandId}
                 onChange={(e) => {
                   setBrandId(e.target.value)
-                  // Reset picked catalog items if brand changes
                   setItems((prev) => prev.map((item) => ({ ...item, pickedGarmentId: '' })))
                 }}
                 className={inputClass}
@@ -333,7 +340,6 @@ export default function NewOrder() {
                 )}
               </div>
 
-              {/* Visual Card Selector for Brand Styles */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className={labelClass}>
@@ -408,7 +414,6 @@ export default function NewOrder() {
                 )}
               </div>
 
-              {/* Garment Inputs */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className={labelClass}>Garment Name*</label>
