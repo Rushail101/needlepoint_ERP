@@ -11,19 +11,26 @@ export default function PinGate({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Login Mode: 'staff' or 'client'
+  // Top tabs: 'staff' | 'client'
   const [mode, setMode] = useState('staff')
+  // Sub-view for client portal: 'login' | 'signup'
+  const [clientView, setClientView] = useState('login')
 
-  // Staff PIN State
+  // Staff PIN
   const [pin, setPin] = useState('')
   const [pinError, setPinError] = useState('')
 
-  // Client State
+  // Client Login fields
   const [brandName, setBrandName] = useState('')
   const [password, setPassword] = useState('')
+
+  // Client Sign Up / Setup fields
+  const [signupBrand, setSignupBrand] = useState('')
+  const [contactPerson, setContactPerson] = useState('')
+  const [contactPhone, setContactPhone] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [needsSetup, setNeedsSetup] = useState(false)
+
   const [clientError, setClientError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -45,15 +52,19 @@ export default function PinGate({ children }) {
     setPin('')
     setBrandName('')
     setPassword('')
-    setNeedsSetup(false)
+    setSignupBrand('')
+    setNewPassword('')
+    setConfirmPassword('')
+    setClientError('')
+    setPinError('')
   }
 
-  // 1. Staff Login with PIN
+  // 1. Staff PIN Login
   const handleStaffLogin = async (e) => {
     e.preventDefault()
     setPinError('')
     const cleanPin = String(pin).trim()
-    const masterPin = String(import.meta.env.VITE_APP_PIN || '').trim()
+    const masterPin = String(import.meta.env.VITE_APP_PIN || import.meta.env.VITE_ADMIN_PIN || '').trim()
 
     if (masterPin && cleanPin === masterPin) {
       const adminUser = { id: 'master-admin', name: 'Admin', role: 'admin' }
@@ -86,7 +97,7 @@ export default function PinGate({ children }) {
     }
   }
 
-  // 2. Client Login & First-Time Setup
+  // 2. Existing Client Login
   const handleClientLogin = async (e) => {
     e.preventDefault()
     setClientError('')
@@ -95,56 +106,29 @@ export default function PinGate({ children }) {
 
     setSubmitting(true)
     try {
-      // Case-insensitive brand lookup
       const { data: brand, error } = await supabase
         .from('brands')
         .select('*')
         .ilike('name', cleanBrand)
-        .single()
+        .maybeSingle()
 
-      if (error || !brand) {
-        throw new Error('Brand name not found. Please contact Needle Point.')
+      if (error) throw error
+
+      if (!brand) {
+        throw new Error('Brand not found. Switch to "Sign Up" to register this brand.')
       }
 
       if (brand.portal_active === false) {
-        throw new Error('Portal access disabled for this brand.')
+        throw new Error('Portal access disabled for this brand. Contact Needle Point.')
       }
 
-      // First-time password setup detection
-      if (!brand.portal_password) {
-        if (!needsSetup) {
-          setNeedsSetup(true)
-          setSubmitting(false)
-          return
-        }
-
-        // Processing setup
-        if (!newPassword || newPassword.length < 4) {
-          throw new Error('Password must be at least 4 characters.')
-        }
-        if (newPassword !== confirmPassword) {
-          throw new Error('Passwords do not match.')
-        }
-
-        const { error: updateErr } = await supabase
-          .from('brands')
-          .update({ portal_password: newPassword.trim() })
-          .eq('id', brand.id)
-
-        if (updateErr) throw updateErr
-
-        const clientUser = {
-          id: brand.id,
-          brandId: brand.id,
-          name: brand.name,
-          role: 'client',
-        }
-        setUser(clientUser)
-        localStorage.setItem('np_user', JSON.stringify(clientUser))
-        return
+      // If the brand exists in DB but never had a password created
+      if (!brand.portal_password || brand.portal_password.trim() === '') {
+        setSignupBrand(brand.name)
+        setClientView('signup')
+        throw new Error('This brand has no password set yet. Please set your password below.')
       }
 
-      // Standard Password Verification
       if (brand.portal_password !== password.trim()) {
         throw new Error('Incorrect password.')
       }
@@ -153,6 +137,94 @@ export default function PinGate({ children }) {
         id: brand.id,
         brandId: brand.id,
         name: brand.name,
+        role: 'client',
+      }
+      setUser(clientUser)
+      localStorage.setItem('np_user', JSON.stringify(clientUser))
+    } catch (err) {
+      setClientError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  // 3. Client Registration / First-Time Setup
+  const handleClientSignUp = async (e) => {
+    e.preventDefault()
+    setClientError('')
+
+    const cleanBrand = signupBrand.trim()
+    const cleanPass = newPassword.trim()
+
+    if (!cleanBrand) {
+      setClientError('Brand name is required.')
+      return
+    }
+    if (cleanPass.length < 4) {
+      setClientError('Password must be at least 4 characters long.')
+      return
+    }
+    if (cleanPass !== confirmPassword.trim()) {
+      setClientError('Passwords do not match.')
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      // Check if brand already exists (case-insensitive)
+      const { data: existingBrand, error: searchErr } = await supabase
+        .from('brands')
+        .select('*')
+        .ilike('name', cleanBrand)
+        .maybeSingle()
+
+      if (searchErr) throw searchErr
+
+      let activeBrand = existingBrand
+
+      if (existingBrand) {
+        // If it already has an established password, redirect to login
+        if (existingBrand.portal_password && existingBrand.portal_password.trim() !== '') {
+          throw new Error('This brand is already registered. Please sign in with your password.')
+        }
+
+        // Brand was pre-created by staff without password; update it
+        const { data: updated, error: updateErr } = await supabase
+          .from('brands')
+          .update({
+            portal_password: cleanPass,
+            portal_active: true,
+            contact_person: contactPerson.trim() || existingBrand.contact_person,
+            contact_phone: contactPhone.trim() || existingBrand.contact_phone,
+          })
+          .eq('id', existingBrand.id)
+          .select()
+          .single()
+
+        if (updateErr) throw updateErr
+        activeBrand = updated
+      } else {
+        // New Brand: create from scratch
+        const { data: created, error: createErr } = await supabase
+          .from('brands')
+          .insert({
+            name: cleanBrand,
+            portal_password: cleanPass,
+            portal_active: true,
+            contact_person: contactPerson.trim() || null,
+            contact_phone: contactPhone.trim() || null,
+          })
+          .select()
+          .single()
+
+        if (createErr) throw createErr
+        activeBrand = created
+      }
+
+      const clientUser = {
+        id: activeBrand.id,
+        brandId: activeBrand.id,
+        name: activeBrand.name,
         role: 'client',
       }
       setUser(clientUser)
@@ -178,8 +250,8 @@ export default function PinGate({ children }) {
             </p>
           </div>
 
-          {/* Mode Switcher Tabs */}
-          <div className="grid grid-cols-2 p-1 bg-gray-950 rounded-2xl border border-gray-800 mb-6">
+          {/* Mode Switcher */}
+          <div className="grid grid-cols-2 p-1 bg-gray-950 rounded-2xl border border-gray-800 mb-5">
             <button
               type="button"
               onClick={() => { setMode('staff'); setPinError(''); setClientError('') }}
@@ -229,84 +301,160 @@ export default function PinGate({ children }) {
             </form>
           )}
 
-          {/* CLIENT BRAND + PASSWORD FORM */}
+          {/* CLIENT PORTAL: LOGIN & SIGNUP */}
           {mode === 'client' && (
-            <form onSubmit={handleClientLogin} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">
-                  Brand Name
-                </label>
-                <input
-                  type="text"
-                  autoFocus
-                  value={brandName}
-                  onChange={(e) => { setBrandName(e.target.value); setNeedsSetup(false) }}
-                  placeholder="e.g. Cayani, Junne, Waqif..."
-                  className="w-full py-2.5 px-3.5 bg-gray-950 border border-gray-700 rounded-xl text-sm text-white focus:outline-none focus:border-brand-500"
-                  required
-                />
+            <div>
+              {/* Toggle Sub-tabs */}
+              <div className="flex border-b border-gray-800 mb-4 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => { setClientView('login'); setClientError('') }}
+                  className={`flex-1 pb-2 transition border-b-2 ${
+                    clientView === 'login'
+                      ? 'border-brand-500 text-brand-400'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  Log In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setClientView('signup'); setClientError('') }}
+                  className={`flex-1 pb-2 transition border-b-2 ${
+                    clientView === 'signup'
+                      ? 'border-brand-500 text-brand-400'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  Sign Up / New Brand
+                </button>
               </div>
 
-              {!needsSetup ? (
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">
-                    Password
-                  </label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter brand password"
-                    className="w-full py-2.5 px-3.5 bg-gray-950 border border-gray-700 rounded-xl text-sm text-white focus:outline-none focus:border-brand-500"
-                  />
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    First time logging in? Enter your brand name and tap continue to set your password.
-                  </p>
-                </div>
+              {clientView === 'login' ? (
+                <form onSubmit={handleClientLogin} className="space-y-3.5">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
+                      Brand Name
+                    </label>
+                    <input
+                      type="text"
+                      autoFocus
+                      value={brandName}
+                      onChange={(e) => setBrandName(e.target.value)}
+                      placeholder="e.g. Cayani"
+                      className="w-full py-2.5 px-3.5 bg-gray-950 border border-gray-700 rounded-xl text-sm text-white focus:outline-none focus:border-brand-500"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
+                      Password
+                    </label>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter password"
+                      className="w-full py-2.5 px-3.5 bg-gray-950 border border-gray-700 rounded-xl text-sm text-white focus:outline-none focus:border-brand-500"
+                      required
+                    />
+                  </div>
+
+                  {clientError && <p className="text-xs text-red-400 text-center font-medium">{clientError}</p>}
+
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="w-full bg-brand-600 hover:bg-brand-500 text-white font-bold py-3 rounded-2xl text-sm transition disabled:opacity-50"
+                  >
+                    {submitting ? 'Authenticating...' : 'Enter Client Portal'}
+                  </button>
+                </form>
               ) : (
-                <div className="p-3 bg-brand-950/40 border border-brand-800/60 rounded-xl space-y-3">
-                  <p className="text-xs text-brand-300 font-semibold">
-                    First-Time Setup: Create a password for {brandName}
-                  </p>
+                <form onSubmit={handleClientSignUp} className="space-y-3">
                   <div>
                     <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                      New Password
+                      Brand Name*
+                    </label>
+                    <input
+                      type="text"
+                      autoFocus
+                      value={signupBrand}
+                      onChange={(e) => setSignupBrand(e.target.value)}
+                      placeholder="e.g. Junne"
+                      className="w-full py-2 px-3 bg-gray-950 border border-gray-700 rounded-xl text-sm text-white focus:outline-none focus:border-brand-500"
+                      required
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                        Contact Name
+                      </label>
+                      <input
+                        type="text"
+                        value={contactPerson}
+                        onChange={(e) => setContactPerson(e.target.value)}
+                        placeholder="Your name"
+                        className="w-full py-2 px-3 bg-gray-950 border border-gray-700 rounded-xl text-xs text-white focus:outline-none focus:border-brand-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                        Phone
+                      </label>
+                      <input
+                        type="tel"
+                        value={contactPhone}
+                        onChange={(e) => setContactPhone(e.target.value)}
+                        placeholder="Mobile no."
+                        className="w-full py-2 px-3 bg-gray-950 border border-gray-700 rounded-xl text-xs text-white focus:outline-none focus:border-brand-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                      Create Password*
                     </label>
                     <input
                       type="password"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       placeholder="At least 4 characters"
-                      className="w-full py-2 px-3 bg-gray-900 border border-gray-700 rounded-lg text-sm text-white focus:outline-none focus:border-brand-500"
+                      className="w-full py-2 px-3 bg-gray-950 border border-gray-700 rounded-xl text-sm text-white focus:outline-none focus:border-brand-500"
                       required
                     />
                   </div>
+
                   <div>
                     <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                      Confirm Password
+                      Confirm Password*
                     </label>
                     <input
                       type="password"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="Repeat password"
-                      className="w-full py-2 px-3 bg-gray-900 border border-gray-700 rounded-lg text-sm text-white focus:outline-none focus:border-brand-500"
+                      className="w-full py-2 px-3 bg-gray-950 border border-gray-700 rounded-xl text-sm text-white focus:outline-none focus:border-brand-500"
                       required
                     />
                   </div>
-                </div>
+
+                  {clientError && <p className="text-xs text-red-400 text-center font-medium">{clientError}</p>}
+
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="w-full bg-brand-600 hover:bg-brand-500 text-white font-bold py-2.5 rounded-2xl text-sm transition disabled:opacity-50"
+                  >
+                    {submitting ? 'Registering...' : 'Register & Enter'}
+                  </button>
+                </form>
               )}
-
-              {clientError && <p className="text-xs text-red-400 text-center font-medium">{clientError}</p>}
-
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full bg-brand-600 hover:bg-brand-500 text-white font-bold py-3 rounded-2xl text-sm transition disabled:opacity-50"
-              >
-                {submitting ? 'Authenticating...' : needsSetup ? 'Set Password & Enter' : 'Enter Client Portal'}
-              </button>
-            </form>
+            </div>
           )}
         </div>
       </div>
