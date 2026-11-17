@@ -7,6 +7,7 @@ import { STAGES, stageInfo } from '../stages.js'
 import { useAuth } from '../components/PinGate.jsx'
 import { can } from '../permissions.js'
 import { exportBatchOrderPDF } from '../pdfExport.js'
+import { orderKeyOf, loadOrderBilling, loadOrderDocuments, billingBadge } from '../billing.js'
 
 const STATUS_LABEL = {
   in_production: { text: 'In Production', color: 'bg-blue-900/50 text-blue-300' },
@@ -89,6 +90,8 @@ export default function Orders() {
   const [filterBrand, setFilterBrand] = useState('')
   const [search, setSearch] = useState('')
   const [copied, setCopied] = useState(false)
+  const [billing, setBilling] = useState({})
+  const [docs, setDocs] = useState([])
 
   const load = async () => {
     setLoading(true)
@@ -105,6 +108,9 @@ export default function Orders() {
     const { data: brs } = await supabase.from('brands').select('*').order('name')
     setRawProducts(prods || [])
     setBrands(brs || [])
+    // Billing status from the accounts app — admins only, and only when the
+    // two apps share a database (otherwise this quietly returns nothing).
+    if (showFinancials) setBilling(await loadOrderBilling())
     setLoading(false)
   }
 
@@ -254,11 +260,12 @@ export default function Orders() {
               }, 0)
 
               const previews = item.items.slice(0, 4)
+              const badge = showFinancials ? billingBadge(billing[orderKeyOf(item.items[0])], batchGrandTotal) : null
 
               return (
                 <div
                   key={item.id}
-                  onClick={() => setSelectedBatch(item)}
+                  onClick={() => { setSelectedBatch(item); setDocs([]); if (showFinancials) loadOrderDocuments(orderKeyOf(item.items[0])).then(setDocs) }}
                   className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-brand-500/60 transition cursor-pointer flex flex-col group relative"
                 >
                   <div className="aspect-square bg-gray-950 p-1.5 grid grid-cols-2 gap-1 overflow-hidden relative">
@@ -287,6 +294,7 @@ export default function Orders() {
                         </span>
                       </div>
                       <p className="text-xs text-gray-400 truncate">{item.brands?.name || 'Independent'}</p>
+                      {badge && <span className={`inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded border font-semibold ${badge.cls}`}>{badge.text}</span>}
                     </div>
 
                     <div className="mt-2 pt-1.5 border-t border-gray-800 flex items-center justify-between text-xs">
@@ -316,6 +324,7 @@ export default function Orders() {
             const gstRate = p.gst_rate ?? 5
             const calculatedTotal = subtotal > 0 ? Math.round(subtotal + (subtotal * gstRate) / 100) : 0
             const grandTotal = p.total_amount != null ? Number(p.total_amount) : calculatedTotal
+            const pBadge = showFinancials ? billingBadge(billing[orderKeyOf(p)], grandTotal) : null
 
             return (
               <div key={p.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-gray-700 transition relative">
@@ -348,6 +357,7 @@ export default function Orders() {
                       <span className={`text-[11px] px-2 py-0.5 rounded-full ${stageInfo(p.stage).color}`}>
                         {stageInfo(p.stage).label}
                       </span>
+                      {pBadge && <span className={`text-[11px] px-2 py-0.5 rounded-full border ${pBadge.cls}`}>{pBadge.text}</span>}
                     </div>
 
                     <div className="mt-2 pt-1.5 border-t border-gray-800 flex items-center justify-between text-xs">
@@ -405,6 +415,24 @@ export default function Orders() {
               <span>Print PDF</span>
             </button>
           </div>
+
+          {showFinancials && docs.length > 0 && (
+            <div className="bg-gray-950 border border-gray-800 rounded-xl p-3 mb-4">
+              <p className="text-xs uppercase font-bold text-gray-300 tracking-wider mb-2">Billing (from accounts)</p>
+              {docs.map(d => (
+                <div key={d.id} className="flex justify-between text-xs py-1 border-b border-gray-800 last:border-0">
+                  <span className="text-gray-300">
+                    <span className="font-mono text-brand-400">{d.number}</span>{' '}
+                    <span className="text-gray-500">{d.kind === 'challan' ? 'challan' : d.status === 'proforma' ? 'proforma' : 'invoice'} · {d.doc_date ? new Date(d.doc_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : ''}</span>
+                  </span>
+                  <span className="text-gray-200 font-semibold">
+                    ₹{Number(d.total || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    {Number(d.paid) > 0 && <span className="text-emerald-400"> · paid ₹{Number(d.paid).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
           <p className="text-xs text-gray-500 mb-2 font-medium">Garments in this order:</p>
 

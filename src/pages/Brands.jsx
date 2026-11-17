@@ -3,6 +3,7 @@ import { supabase, uploadPhoto } from '../supabaseClient.js'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
 import { useAuth } from '../components/PinGate.jsx'
 import { can } from '../permissions.js'
+import { INDIAN_STATES, stateFromGSTIN, isGSTINValid } from '../billing.js'
 
 export default function Brands() {
   const { user } = useAuth()
@@ -82,6 +83,22 @@ function BrandForm({ brand, onClose, onSaved }) {
   const [copied, setCopied] = useState(false)
   const [file, setFile] = useState(null)
   const [saving, setSaving] = useState(false)
+  // Billing details — synced to the client party in the accounts app
+  const [gstin, setGstin] = useState(brand?.gstin || '')
+  const [state, setState] = useState(brand?.state || '')
+  const [pan, setPan] = useState(brand?.pan || '')
+  const [email, setEmail] = useState(brand?.email || '')
+  const [address, setAddress] = useState(brand?.billing_address || '')
+  const [terms, setTerms] = useState(brand?.payment_terms_days ?? '')
+  const gstinBad = gstin.trim().length > 0 && !isGSTINValid(gstin)
+  const onGstin = (v) => {
+    const g = v.toUpperCase().replace(/\s/g, '')
+    setGstin(g)
+    if (g.length === 15) {
+      if (!state) setState(stateFromGSTIN(g))
+      if (!pan) setPan(g.slice(2, 12))
+    }
+  }
 
   const handleCopy = async () => {
     if (!portalPassword) return
@@ -106,12 +123,24 @@ function BrandForm({ brand, onClose, onSaved }) {
         portal_active: portalActive,
         logo_url,
       }
-
-      if (isEdit) {
-        await supabase.from('brands').update(payload).eq('id', brand.id)
-      } else {
-        await supabase.from('brands').insert(payload)
+      // Billing fields exist once the accounts link SQL has been run; only send
+      // them when filled in (or already present) so saving works either way.
+      const billing = {
+        gstin: gstin.trim() || null, state: state || null, pan: pan.trim() || null,
+        email: email.trim() || null, billing_address: address.trim() || null,
+        payment_terms_days: terms === '' ? null : Number(terms),
       }
+      const hasBilling = Object.values(billing).some(v => v != null) || (brand && 'gstin' in brand)
+      if (hasBilling) Object.assign(payload, billing)
+
+      // supabase-js reports failures in { error } rather than throwing — they
+      // used to be ignored, so a failed save looked like it worked.
+      const { error } = isEdit
+        ? await supabase.from('brands').update(payload).eq('id', brand.id)
+        : await supabase.from('brands').insert(payload)
+      if (error) throw new Error(/column .* does not exist|schema cache/i.test(error.message)
+        ? `${error.message} — run the accounts link SQL (sql/integration/001_link_operations.sql) to enable billing fields.`
+        : error.message)
       onSaved()
     } catch (err) {
       alert('Could not save: ' + err.message)
@@ -124,7 +153,8 @@ function BrandForm({ brand, onClose, onSaved }) {
     if (!confirm(`Delete "${brand.name}"? Garments under this brand will be kept but unlinked from it.`)) return
     setSaving(true)
     try {
-      await supabase.from('brands').delete().eq('id', brand.id)
+      const { error } = await supabase.from('brands').delete().eq('id', brand.id)
+      if (error) throw error
       onSaved()
     } catch (err) {
       alert('Could not delete: ' + err.message)
@@ -171,6 +201,42 @@ function BrandForm({ brand, onClose, onSaved }) {
           onChange={(e) => setPhone(e.target.value)}
           className={inputClass}
         />
+
+        {/* Billing details — used on invoices and kept in sync with the accounts app */}
+        <div className="bg-gray-950 border border-gray-800 rounded-xl p-3.5 mb-4">
+          <p className="text-xs font-bold text-gray-300 uppercase tracking-wider mb-2">Billing details</p>
+          <label className={labelClass}>GSTIN</label>
+          <input value={gstin} maxLength={15} onChange={(e) => onGstin(e.target.value)} placeholder="07AABCC1234D1Z2"
+            className={`${inputClass} ${gstinBad && gstin.length >= 15 ? 'border-red-500' : ''}`} />
+          {gstin.length === 15 && (
+            <p className={`text-[11px] -mt-2 mb-2 ${gstinBad ? 'text-red-400' : 'text-emerald-400'}`}>
+              {gstinBad ? '⚠ GSTIN fails the checksum — check for a typo' : '✓ Valid — state and PAN filled from it'}
+            </p>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className={labelClass}>State (place of supply)</label>
+              <select value={state} onChange={(e) => setState(e.target.value)} className={inputClass}>
+                <option value="">Select…</option>
+                {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelClass}>PAN</label>
+              <input value={pan} onChange={(e) => setPan(e.target.value.toUpperCase())} className={inputClass} />
+            </div>
+            <div>
+              <label className={labelClass}>Billing email</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className={labelClass}>Payment terms (days)</label>
+              <input type="number" min="0" value={terms} onChange={(e) => setTerms(e.target.value)} placeholder="e.g. 15" className={inputClass} />
+            </div>
+          </div>
+          <label className={labelClass}>Billing address</label>
+          <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={2} className={inputClass} />
+        </div>
 
         {/* Client Portal Password & Access Controls */}
         <div className="bg-gray-950 border border-gray-800 rounded-xl p-3.5 mb-4">

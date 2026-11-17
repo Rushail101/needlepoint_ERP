@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import Modal, { inputClass, labelClass } from './Modal.jsx'
 import { supabase } from '../supabaseClient.js'
 import { useAuth } from './PinGate.jsx'
+import { sendTelegramMessage } from '../telegram.js'
 
 export default function ShipmentModal({ product, sizes, onClose, onUpdated }) {
   const { user } = useAuth()
@@ -81,6 +82,8 @@ export default function ShipmentModal({ product, sizes, onClose, onUpdated }) {
       if (rowsToInsert.length > 0) {
         const { error } = await supabase.from('shipments').insert(rowsToInsert)
         if (error) throw error
+        // Remind the office there's something to bill (if Telegram is set up)
+        sendTelegramMessage(`🚚 Dispatched ${currentBatchTotal} pcs of <b>${product.name}</b>${product.po_number ? ` (PO ${product.po_number})` : ''} — ready to invoice in Accounts → Production Orders.`)
       }
 
       setDispatchCounts({})
@@ -94,9 +97,13 @@ export default function ShipmentModal({ product, sizes, onClose, onUpdated }) {
     }
   }
 
-  const handleDelete = async (id) => {
-    if (!confirm('Remove this dispatch record?')) return
-    await supabase.from('shipments').delete().eq('id', id)
+  const handleDelete = async (s) => {
+    // A dispatch already on a tax invoice is part of the accounts — removing it
+    // here would leave the invoice and the dispatch log disagreeing.
+    if (s.invoice_id) { alert('This dispatch is already on a tax invoice. Cancel or correct the invoice in the accounts app first.'); return }
+    if (!confirm(s.challan_id ? 'This dispatch is on a delivery challan. Remove it anyway?' : 'Remove this dispatch record?')) return
+    const { error } = await supabase.from('shipments').delete().eq('id', s.id)
+    if (error) alert('Could not remove: ' + error.message)
     await loadShipments()
     if (onUpdated) onUpdated()
   }
@@ -242,11 +249,16 @@ export default function ShipmentModal({ product, sizes, onClose, onUpdated }) {
                   </span>
                 </div>
                 {s.notes && <p className="text-gray-400 text-[11px] mt-0.5">{s.notes}</p>}
+                {(s.invoice_id || s.challan_id) && (
+                  <p className="text-[10px] mt-0.5 font-semibold">
+                    {s.invoice_id ? <span className="text-emerald-400">🧾 Invoiced</span> : <span className="text-cyan-400">🚚 On challan — invoice pending</span>}
+                  </p>
+                )}
               </div>
 
               <button
                 type="button"
-                onClick={() => handleDelete(s.id)}
+                onClick={() => handleDelete(s)}
                 className="text-gray-500 hover:text-red-400 px-1 text-sm font-bold"
                 title="Delete entry"
               >

@@ -49,6 +49,20 @@ npm run dev
 - **PDF export** — one-click summary of a garment's photos, sizes, work history, and sample versions
 - **Roles** — Admin (everything, incl. managing who has access), Floor Manager (logs/edits work, updates stage, view-only elsewhere), Worker (views Garments and Brands only). The admin's own PIN is set via env var; floor manager and worker PINs are created and managed by the admin from the Access tab — no redeploy needed to add someone.
 
+## Linked with the accounts app
+
+When this app shares a Supabase project with the Needle Point accounts app (see that repo's `MERGE_GUIDE.md`):
+
+- **Brands:** there's a *Billing details* section (GSTIN with auto-filled state and PAN, address, email, payment terms). It stays in sync with the brand's client party in accounts.
+- **Orders (admin):** each order shows a billing badge (*Proforma sent / Advance / Due ₹… / Paid*), and the order popup lists its invoices and challans.
+- **Dispatches:**
+  - Each dispatch is marked *Invoiced* or *On challan*.
+  - A dispatch that's already on an invoice can't be deleted.
+  - Every new dispatch sends a Telegram "ready to invoice" alert, if Telegram is set up.
+- **Billing itself** (proformas, invoices, challans, payroll) happens in Accounts → Production Orders / Payroll.
+
+Run `supabase/migration_007_schema_catchup.sql` on a fresh project. It records tables the app already uses (`garments`, `shipments`, order fields, brand portal) that the original `schema.sql` never created.
+
 ## Natural next additions (not built yet, easy to bolt on later)
 
 - Low-stock / pending-quantity alerts on the dashboard
