@@ -1,22 +1,15 @@
-// Sends a message to a Telegram chat via the Bot API. Configured via
-// VITE_TELEGRAM_BOT_TOKEN and VITE_TELEGRAM_CHAT_ID — if either is missing,
-// this silently does nothing, so the app works fine without Telegram set up.
-export async function sendTelegramMessage(text, parseMode = 'HTML') {
-  const token = import.meta.env.VITE_TELEGRAM_BOT_TOKEN
-  const chatId = import.meta.env.VITE_TELEGRAM_CHAT_ID
-  if (!token || !chatId) return
+import { supabase } from './supabaseClient.js'
 
+// Sends a Telegram message through the `notify` Supabase Edge Function, which
+// holds the bot token as a server-side secret. (The token used to sit in a
+// VITE_ env var, i.e. inside the public website code, where anyone could
+// take it and post to your group.) Fails quietly if the function isn't
+// deployed, so the app works without Telegram.
+export async function sendTelegramMessage(text, parseMode = 'HTML') {
   try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text,
-        parse_mode: parseMode,
-      }),
-    })
+    const { error } = await supabase.functions.invoke('notify', { body: { text, parse_mode: parseMode } })
+    if (error) console.warn('Telegram notify skipped:', error.message)
   } catch (err) {
-    console.error('Telegram notification failed:', err)
+    console.warn('Telegram notify skipped:', err?.message || err)
   }
 }

@@ -1,6 +1,10 @@
+import { toast } from '../components/Toast'
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { supabase } from '../supabaseClient.js'
+import { useAuth } from '../components/PinGate.jsx'
+import { can } from '../permissions.js'
+import { pieceEarnings, inr } from '../production.js'
 import { exportEmployeePDF } from '../pdfExport.js'
 import { WORK_TYPE_LABEL } from '../workTypes.js'
 
@@ -18,6 +22,10 @@ export default function EmployeeSummary() {
   const [logs, setLogs] = useState([])
   const [range, setRange] = useState('week')
   const [exporting, setExporting] = useState(false)
+  const [rates, setRates] = useState([])
+  const [faults, setFaults] = useState([])
+  const { user } = useAuth()
+  const showMoney = can(user, 'view_financials')   // salary and pay are admin-only
 
   useEffect(() => {
     const load = async () => {
@@ -28,6 +36,12 @@ export default function EmployeeSummary() {
         .eq('employee_id', id)
         .order('logged_at', { ascending: false })
       setEmployee(e); setLogs(l || [])
+      const [{ data: r }, { data: f }] = await Promise.all([
+        supabase.from('piece_rates').select('*'),
+        // rejections found later in QC on this person's work
+        supabase.from('work_logs').select('rejected_qty, reject_reason, logged_at').eq('responsible_employee_id', id),
+      ])
+      setRates(r || []); setFaults(f || [])
     }
     load()
   }, [id])
@@ -47,9 +61,14 @@ export default function EmployeeSummary() {
     return true
   })
 
+  const inRange = d => range === 'all' || (range === 'week' ? d >= startOfWeek : d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear())
   const totalPieces = filtered.reduce((sum, l) => sum + (l.quantity || 0), 0)
+  // pieces per work type (this used to count entries, which read like pieces)
   const byType = {}
-  filtered.forEach(l => { byType[l.work_type] = (byType[l.work_type] || 0) + 1 })
+  filtered.forEach(l => { byType[l.work_type] = (byType[l.work_type] || 0) + (Number(l.quantity) || 0) })
+  const earnings = pieceEarnings(filtered, rates)
+  const rejectedOfMine = faults.filter(f => inRange(new Date(f.logged_at))).reduce((s, f) => s + (Number(f.rejected_qty) || 0), 0)
+  const madePieces = filtered.filter(l => ['stitching', 'embroidery', 'screen_printing'].includes(l.work_type)).reduce((s, l) => s + (Number(l.quantity) || 0), 0)
 
   // Cost per piece, using the fixed monthly salary as the base.
   let costPerPiece = null
@@ -79,7 +98,7 @@ export default function EmployeeSummary() {
         totalEntries: filtered.length, byType, costPerPiece, workTypeLabel: WORK_TYPE_LABEL,
       })
     } catch (err) {
-      alert('Could not export PDF: ' + err.message)
+      toast('Could not export PDF: ' + err.message, 'error')
     } finally {
       setExporting(false)
     }
@@ -123,7 +142,24 @@ export default function EmployeeSummary() {
         </div>
       </div>
 
-      {employee.monthly_salary ? (
+      {(rejectedOfMine > 0 || madePieces > 0) && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 mb-3 text-xs flex justify-between">
+          <span className="text-gray-400">QC rejections on their work</span>
+          <span className={rejectedOfMine && madePieces && rejectedOfMine / madePieces > 0.05 ? 'text-red-400 font-bold' : 'text-gray-200'}>
+            {rejectedOfMine} pcs{madePieces ? ` · ${((rejectedOfMine / madePieces) * 100).toFixed(1)}% of ${madePieces} made` : ''}
+          </span>
+        </div>
+      )}
+
+      {showMoney && employee.pay_type === 'piece' && (
+        <div className="bg-gray-900 border border-emerald-900/50 rounded-xl p-4 mb-6">
+          <p className="text-lg font-bold text-emerald-400">{inr(earnings.total)}</p>
+          <p className="text-xs text-gray-400 mt-1">Piece-rate pay for {rangeLabel.toLowerCase()}</p>
+          {earnings.unpriced > 0 && <p className="text-[11px] text-amber-400 mt-1">{earnings.unpriced} pcs have no rate set — add rates in Settings → Piece rates.</p>}
+        </div>
+      )}
+
+      {!showMoney || employee.pay_type === 'piece' ? null : employee.monthly_salary ? (
         <div className="grid grid-cols-2 gap-3 mb-6">
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
             <p className="text-lg font-bold text-gray-100">₹{employee.monthly_salary}</p>
@@ -137,13 +173,13 @@ export default function EmployeeSummary() {
       ) : (
         <p className="text-xs text-gray-600 mb-6">No monthly salary set — add one from the Team tab to see cost per piece.</p>
       )}
-      {costNote && <p className="text-[11px] text-gray-600 -mt-4 mb-6">{costNote}</p>}
+      {showMoney && costNote && <p className="text-[11px] text-gray-600 -mt-4 mb-6">{costNote}</p>}
 
       {Object.keys(byType).length > 0 && (
         <div className="flex flex-wrap gap-2 mb-6">
           {Object.entries(byType).map(([type, count]) => (
             <span key={type} className="text-xs px-3 py-1.5 rounded-full bg-gray-800 text-gray-300">
-              {WORK_TYPE_LABEL[type] || type}: {count}
+              {WORK_TYPE_LABEL[type] || type}: {count} pcs
             </span>
           ))}
         </div>
@@ -158,7 +194,7 @@ export default function EmployeeSummary() {
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium truncate text-gray-100">{l.products?.name}</p>
-              <p className="text-xs text-gray-400">{WORK_TYPE_LABEL[l.work_type] || l.work_type} {l.quantity ? `· ${l.quantity} pcs` : ''}</p>
+              <p className="text-xs text-gray-400">{WORK_TYPE_LABEL[l.work_type] || l.work_type}{l.size_label ? ` · ${l.size_label}` : ''} {l.quantity ? `· ${l.quantity} pcs` : ''}{l.rejected_qty ? <span className="text-red-400"> · {l.rejected_qty} rejected</span> : null}</p>
             </div>
             <p className="text-[11px] text-gray-600 flex-shrink-0">{new Date(l.logged_at).toLocaleDateString()}</p>
           </div>

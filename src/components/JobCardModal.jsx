@@ -1,5 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import QRCode from 'qrcode'
 import Modal from './Modal.jsx'
+import { fmtDay } from '../production.js'
 
 export default function JobCardModal({ product, brandName, sizes, onClose }) {
   const printRef = useRef(null)
@@ -9,8 +11,11 @@ export default function JobCardModal({ product, brandName, sizes, onClose }) {
   }
 
   const totalQty = (sizes || []).reduce((acc, s) => acc + (Number(s.quantity) || 0), 0)
-  const qrValue = `${window.location.origin}/products/${product.id}`
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(qrValue)}`
+  // Scanning opens Work Log with this garment already picked. Generated on the
+  // phone itself (it used to call an outside QR website).
+  const qrValue = `${window.location.origin}/worklog?product=${product.id}`
+  const [qrUrl, setQrUrl] = useState('')
+  useEffect(() => { QRCode.toDataURL(qrValue, { width: 200, margin: 1 }).then(setQrUrl).catch(() => {}) }, [qrValue])
 
   return (
     <Modal onClose={onClose}>
@@ -55,6 +60,7 @@ export default function JobCardModal({ product, brandName, sizes, onClose }) {
             {product.style_code && (
               <p className="text-[10px] text-gray-600 font-mono">Style: {product.style_code}</p>
             )}
+            {product.due_date && <p className="text-[11px] font-black">DELIVER BY {fmtDay(product.due_date).toUpperCase()}</p>}
           </div>
         </div>
 
@@ -80,7 +86,7 @@ export default function JobCardModal({ product, brandName, sizes, onClose }) {
 
         {/* QR Code and Instructions */}
         <div className="flex items-center justify-between mt-3 pt-2 border-t border-dashed border-gray-400">
-          <img src={qrUrl} alt="QR Code" className="w-20 h-20" />
+          {qrUrl ? <img src={qrUrl} alt="QR Code" className="w-20 h-20" /> : <div className="w-20 h-20" />}
           <div className="text-right pl-2">
             <p className="text-[10px] font-bold leading-tight">Scan with mobile</p>
             <p className="text-[9px] text-gray-600 leading-tight">to log Cutting, Stitching or Finishing</p>

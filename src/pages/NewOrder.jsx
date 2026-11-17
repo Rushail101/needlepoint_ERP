@@ -1,14 +1,17 @@
+import { toast } from '../components/Toast'
 import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { supabase, uploadPhoto } from '../supabaseClient.js'
+import { supabase, uploadPhoto, getSettings } from '../supabaseClient.js'
+import { todayISO, addDays } from '../production.js'
 import { inputClass, labelClass } from '../components/Modal.jsx'
 import { useAuth } from '../components/PinGate.jsx'
 import { sendTelegramMessage } from '../telegram.js'
 import { buildBatchSummaryText } from '../orderSummary.js'
 
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL']
-const SAMPLE_FEE_BASE = 5000
-const SAMPLE_GST_RATE = 18
+// Defaults; the real values come from Settings (ops_settings) when available.
+let SAMPLE_FEE_BASE = 5000
+let SAMPLE_GST_RATE = 18
 
 export default function NewOrder() {
   const navigate = useNavigate()
@@ -21,6 +24,16 @@ export default function NewOrder() {
   const [poNumber, setPoNumber] = useState('')
   const [status, setStatus] = useState('in_production')
   const [submitting, setSubmitting] = useState(false)
+  const [dueDate, setDueDate] = useState('')
+  const [, setSettingsLoaded] = useState(false)
+  useEffect(() => {
+    getSettings().then(st => {
+      SAMPLE_FEE_BASE = Number(st.sample_fee) || SAMPLE_FEE_BASE
+      SAMPLE_GST_RATE = Number(st.sample_gst) || SAMPLE_GST_RATE
+      setDueDate(d => d || addDays(todayISO(), Number(st.default_lead_days) || 21))
+      setSettingsLoaded(true)
+    })
+  }, [])
 
   const [items, setItems] = useState([
     {
@@ -131,13 +144,13 @@ export default function NewOrder() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!currentBrandId) {
-      alert('Please select a client brand.')
+      toast('Please select a client brand.', 'error')
       return
     }
 
     for (const it of items) {
       if (!it.name.trim()) {
-        alert('Please provide a name for all garments in this order.')
+        toast('Please provide a name for all garments in this order.', 'error')
         return
       }
     }
@@ -192,6 +205,7 @@ export default function NewOrder() {
           style_code: it.styleCode.trim() || null,
           brand_id: finalBrandId,
           po_number: cleanPo,
+          due_date: dueDate || null,
           status: isClient ? 'in_production' : status,
           stage: 'cutting',
           planned_work: it.plannedWork || ['cutting', 'stitching', 'finishing'],
@@ -209,7 +223,7 @@ export default function NewOrder() {
           .select()
           .single()
 
-        if (pErr) throw new Error(pErr.message || 'Error creating product record')
+        if (pErr) throw new Error(/due_date/.test(pErr.message || '') ? 'The database needs migration_008 (delivery dates) — ask the admin to run it.' : (pErr.message || 'Error creating product record'))
 
         if (validSizes.length > 0) {
           const sizeInserts = validSizes.map((s) => ({
@@ -246,13 +260,13 @@ export default function NewOrder() {
         }),
       }
 
-      const summaryText = buildBatchSummaryText({ batch: batchData, brandName })
+      const summaryText = buildBatchSummaryText({ batch: batchData, brandName }) + (dueDate ? `\n*Delivery by:* ${new Date(dueDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : '')
       sendTelegramMessage(summaryText, 'Markdown')
 
       navigate('/orders')
     } catch (err) {
       console.error('Submit Error:', err)
-      alert('Could not place order: ' + err.message)
+      toast('Could not place order: ' + err.message, 'error')
     } finally {
       setSubmitting(false)
     }
@@ -271,7 +285,7 @@ export default function NewOrder() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-4 gap-3">
           <div>
             <label className={labelClass}>Client Brand*</label>
             {isClient ? (
@@ -308,6 +322,11 @@ export default function NewOrder() {
               placeholder="e.g. PO-2026-001"
               className={inputClass}
             />
+          </div>
+
+          <div>
+            <label className={labelClass}>{isClient ? 'Needed by' : 'Delivery date'}</label>
+            <input type="date" value={dueDate} min={todayISO()} onChange={(e) => setDueDate(e.target.value)} className={inputClass} />
           </div>
 
           {!isClient && (

@@ -30,12 +30,16 @@ export const ROLES = {
       'edit_garments',
       'manage_garment_catalog',
       'log_work',
+      'view_dashboard',
+      'manage_materials',
+      'manage_job_work',
+      'log_qc',
       // 'view_financials' and 'edit_financials' removed
     ],
   },
   tailor: {
     label: 'Tailor',
-    can: ['view_orders', 'log_work'],
+    can: ['view_orders', 'log_work'],   // workers: see orders, log their own work
   },
   client: {
     label: 'Client',
@@ -48,10 +52,15 @@ export const ROLES = {
   },
 }
 
+// The Access screen creates 'floor_manager' and 'worker' logins, but the roles
+// above are 'manager' and 'tailor' — so those logins had no permissions at all.
+const ROLE_ALIASES = { floor_manager: 'manager', worker: 'tailor' }
+export const normRole = r => { const x = String(r || '').toLowerCase(); return ROLE_ALIASES[x] || x }
+
 export function can(user, action) {
   if (!user) return false
-  const role = String(user.role || '').toLowerCase()
-  if (role === 'admin' || user.name === 'Admin') return true
+  const role = normRole(user.role)
+  if (role === 'admin') return true
 
   const roleConfig = ROLES[role]
   if (!roleConfig) return false

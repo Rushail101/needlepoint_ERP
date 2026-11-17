@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
-import { supabase, uploadPhoto } from '../supabaseClient.js'
+import { supabase, uploadPhoto, getSettings, must } from '../supabaseClient.js'
+import { toast } from './Toast.jsx'
 import Modal, { FormActions, inputClass, labelClass } from './Modal.jsx'
 import { sendTelegramMessage } from '../telegram.js'
 
-// Fixed sample pricing rule: every sample is a flat ₹5,000 + 18% GST = ₹5,900,
-// regardless of quantity. Production orders keep a normal price-per-piece × GST slab.
-export const SAMPLE_FEE_BASE = 5000
-export const SAMPLE_GST_RATE = 18
+// Sample pricing: a flat fee + GST regardless of quantity, set in Settings
+// (defaults ₹5,000 + 18%). Production orders keep price-per-piece × GST slab.
 
 export default function OrderEditModal({ product, brands, onClose, onSaved, onDeleted }) {
   const [name, setName] = useState(product.name || '')
@@ -14,6 +13,11 @@ export default function OrderEditModal({ product, brands, onClose, onSaved, onDe
   const [brandId, setBrandId] = useState(product.brand_id || '')
   const [poNumber, setPoNumber] = useState(product.po_number || '')
   const [status, setStatus] = useState(product.status || 'in_production')
+  const [dueDate, setDueDate] = useState(product.due_date || '')
+  const [applyToPO, setApplyToPO] = useState(true)
+  const [SAMPLE_FEE_BASE, setFee] = useState(5000)
+  const [SAMPLE_GST_RATE, setFeeGst] = useState(18)
+  useEffect(() => { getSettings().then(st => { setFee(Number(st.sample_fee) || 5000); setFeeGst(Number(st.sample_gst) || 18) }) }, [])
   const [file, setFile] = useState(null)
   const [pdfFile, setPdfFile] = useState(null)
 
@@ -56,6 +60,7 @@ export default function OrderEditModal({ product, brands, onClose, onSaved, onDe
         style_code: styleCode.trim() || null,
         brand_id: brandId || null,
         po_number: poNumber.trim().toUpperCase() || null,
+        due_date: dueDate || null,
         status,
         cover_photo_url,
         tech_pack_url,
@@ -66,6 +71,13 @@ export default function OrderEditModal({ product, brands, onClose, onSaved, onDe
 
       const { error: err } = await supabase.from('products').update(payload).eq('id', product.id)
       if (err) throw err
+      // The delivery date usually applies to the whole PO — copy it to the other garments.
+      if (applyToPO && payload.po_number && (product.due_date || '') !== (dueDate || '')) {
+        let q = supabase.from('products').update({ due_date: dueDate || null }).eq('po_number', payload.po_number).neq('id', product.id)
+        q = payload.brand_id ? q.eq('brand_id', payload.brand_id) : q
+        const { error: e2 } = await q
+        if (e2) toast('Saved, but the other garments in the PO kept their old date: ' + e2.message, 'warn')
+      }
 
       // Compile change log for Telegram notification
       const changes = []
@@ -121,7 +133,7 @@ export default function OrderEditModal({ product, brands, onClose, onSaved, onDe
     if (!confirm(`Delete "${product.name}"? This removes all its photos, sizes, and work history too.`)) return
     setSaving(true)
     try {
-      await supabase.from('products').delete().eq('id', product.id)
+      must(await supabase.from('products').delete().eq('id', product.id), 'Delete')
       
       const brandName = brands.find((b) => b.id === product.brand_id)?.name || 'No Brand'
       const deleteMessage = [
@@ -137,7 +149,7 @@ export default function OrderEditModal({ product, brands, onClose, onSaved, onDe
 
       onDeleted()
     } catch (err) {
-      alert('Could not delete: ' + err.message)
+      toast('Could not delete: ' + err.message, 'error')
     } finally {
       setSaving(false)
     }
@@ -163,12 +175,27 @@ export default function OrderEditModal({ product, brands, onClose, onSaved, onDe
         <label className={labelClass}>PO Number</label>
         <input value={poNumber} onChange={(e) => setPoNumber(e.target.value)} className={inputClass} placeholder="optional" />
 
-        <label className={labelClass}>Order State</label>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass}>
-          <option value="in_production">In Production</option>
-          <option value="sampling">Sampling</option>
-          <option value="on_hold">On Hold</option>
-        </select>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className={labelClass}>Order State</label>
+            <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass}>
+              <option value="in_production">In Production</option>
+              <option value="sampling">Sampling</option>
+              <option value="on_hold">On Hold</option>
+              <option value="completed">Completed</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass}>Delivery date</label>
+            <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={inputClass} />
+          </div>
+        </div>
+        {poNumber.trim() && (product.due_date || '') !== (dueDate || '') && (
+          <label className="flex items-center gap-2 text-xs text-gray-400 -mt-1 mb-3">
+            <input type="checkbox" checked={applyToPO} onChange={(e) => setApplyToPO(e.target.checked)} />
+            Use this delivery date for every garment in PO {poNumber.trim().toUpperCase()}
+          </label>
+        )}
 
         <label className={labelClass}>Cover Photo</label>
         {product.cover_photo_url && !file && (

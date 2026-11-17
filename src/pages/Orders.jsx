@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
 import OrderEditModal from '../components/OrderEditModal.jsx'
@@ -8,6 +8,7 @@ import { useAuth } from '../components/PinGate.jsx'
 import { can } from '../permissions.js'
 import { exportBatchOrderPDF } from '../pdfExport.js'
 import { orderKeyOf, loadOrderBilling, loadOrderDocuments, billingBadge } from '../billing.js'
+import { deliveryStatus, isDone, todayISO, addDays } from '../production.js'
 
 const STATUS_LABEL = {
   in_production: { text: 'In Production', color: 'bg-blue-900/50 text-blue-300' },
@@ -91,6 +92,10 @@ export default function Orders() {
   const [search, setSearch] = useState('')
   const [copied, setCopied] = useState(false)
   const [billing, setBilling] = useState({})
+  // Views opened from the dashboard: ?view=late|risk|week|nodate, ?stage=<key>
+  const [searchParams] = useSearchParams()
+  const [view, setView] = useState(searchParams.get('view') || '')
+  const [stageFilter, setStageFilter] = useState(searchParams.get('stage') || '')
   const [docs, setDocs] = useState([])
 
   const load = async () => {
@@ -150,7 +155,25 @@ export default function Orders() {
     })
   })()
 
+  const itemsOf = g => (g.isBatch ? g.items : [g])
+  const dueOf = g => itemsOf(g).filter(i => !isDone(i) && i.due_date).map(i => i.due_date).sort()[0] || null
+  const statusOf = g => { const open = itemsOf(g).filter(i => !isDone(i)); const first = [...open].sort((a, b) => (a.due_date || '9').localeCompare(b.due_date || '9'))[0]; return first ? deliveryStatus(first) : null }
+  const matchesView = g => {
+    const open = itemsOf(g).filter(i => !isDone(i) && i.status !== 'on_hold')
+    if (stageFilter && !open.some(i => (i.stage || 'cutting') === stageFilter)) return false
+    if (!view) return true
+    if (!open.length) return false
+    const ds = statusOf(g)
+    if (view === 'late') return ds?.key === 'late'
+    if (view === 'risk') return ds?.key === 'risk'
+    if (view === 'week') { const d = dueOf(g); return !!d && d >= todayISO() && d <= addDays(todayISO(), 7) }
+    if (view === 'nodate') return open.some(i => !i.due_date)
+    if (view === 'open') return true
+    return true
+  }
+
   const filtered = groupedOrders
+    .filter(matchesView)
     .filter(g => (!isClient && filterBrand ? g.brand_id === filterBrand : true))
     .filter(g => {
       if (!search.trim()) return true
@@ -181,6 +204,11 @@ export default function Orders() {
       const bDone = isFinished(b) ? 1 : 0
       if (aDone !== bDone) return aDone - bDone
 
+      // Open orders: soonest delivery first, then newest
+      const da = dueOf(a), db = dueOf(b)
+      if (da && db && da !== db) return da.localeCompare(db)
+      if (da && !db) return -1
+      if (!da && db) return 1
       return new Date(b.created_at) - new Date(a.created_at)
     })
 
@@ -216,6 +244,13 @@ export default function Orders() {
         className="w-full bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 rounded-lg px-3 py-2 mb-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
       />
 
+      <div className="flex gap-1.5 overflow-x-auto pb-2 mb-1">
+        {[['', 'All'], ['open', 'In production'], ['late', '🔴 Late'], ['risk', '🟠 At risk'], ['week', 'Due this week'], ...(!isClient ? [['nodate', 'No delivery date']] : [])].map(([k, l]) => (
+          <button key={k || 'all'} onClick={() => setView(k)} className={`px-3 py-1 rounded-full text-xs whitespace-nowrap font-semibold ${view === k ? 'bg-gray-100 text-gray-900' : 'bg-gray-900 border border-gray-700 text-gray-400'}`}>{l}</button>
+        ))}
+        {stageFilter && <button onClick={() => setStageFilter('')} className="px-3 py-1 rounded-full text-xs whitespace-nowrap font-semibold bg-brand-600 text-white">Stage: {stageInfo(stageFilter).label} ✕</button>}
+      </div>
+
       {!isClient && brands.length > 0 && (
         <div className="flex gap-2 overflow-x-auto pb-3 mb-2">
           <button
@@ -239,7 +274,10 @@ export default function Orders() {
       {loading ? (
         <p className="text-gray-500 text-center py-10">Loading orders...</p>
       ) : filtered.length === 0 ? (
-        <p className="text-gray-500 text-center py-10">No orders found.</p>
+        <div className="text-center py-10">
+          <p className="text-gray-400">No orders {view || stageFilter ? 'match this view' : 'yet'}.</p>
+          {(view || stageFilter) && <button onClick={() => { setView(''); setStageFilter('') }} className="text-brand-400 text-sm mt-2">Show all orders</button>}
+        </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
           {filtered.map((item) => {
@@ -261,6 +299,7 @@ export default function Orders() {
 
               const previews = item.items.slice(0, 4)
               const badge = showFinancials ? billingBadge(billing[orderKeyOf(item.items[0])], batchGrandTotal) : null
+              const ds = statusOf(item)
 
               return (
                 <div
@@ -294,7 +333,10 @@ export default function Orders() {
                         </span>
                       </div>
                       <p className="text-xs text-gray-400 truncate">{item.brands?.name || 'Independent'}</p>
-                      {badge && <span className={`inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded border font-semibold ${badge.cls}`}>{badge.text}</span>}
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {ds && <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold ${ds.cls}`}>{ds.text}</span>}
+                        {badge && <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold ${badge.cls}`}>{badge.text}</span>}
+                      </div>
                     </div>
 
                     <div className="mt-2 pt-1.5 border-t border-gray-800 flex items-center justify-between text-xs">
@@ -325,6 +367,7 @@ export default function Orders() {
             const calculatedTotal = subtotal > 0 ? Math.round(subtotal + (subtotal * gstRate) / 100) : 0
             const grandTotal = p.total_amount != null ? Number(p.total_amount) : calculatedTotal
             const pBadge = showFinancials ? billingBadge(billing[orderKeyOf(p)], grandTotal) : null
+            const pDs = deliveryStatus(p)
 
             return (
               <div key={p.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-gray-700 transition relative">
@@ -357,6 +400,7 @@ export default function Orders() {
                       <span className={`text-[11px] px-2 py-0.5 rounded-full ${stageInfo(p.stage).color}`}>
                         {stageInfo(p.stage).label}
                       </span>
+                      {pDs && <span className={`text-[11px] px-2 py-0.5 rounded-full border ${pDs.cls}`}>{pDs.text}</span>}
                       {pBadge && <span className={`text-[11px] px-2 py-0.5 rounded-full border ${pBadge.cls}`}>{pBadge.text}</span>}
                     </div>
 

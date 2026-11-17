@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { supabase, uploadPhoto } from '../supabaseClient.js'
+import { supabase, uploadPhoto, must } from '../supabaseClient.js'
+import { toast } from '../components/Toast.jsx'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
 
 export default function Employees() {
@@ -35,7 +36,7 @@ export default function Employees() {
 
     const { data: today } = await supabase
       .from('work_logs')
-      .select('*, products(name, cover_photo_url), employees(name)')
+      .select('*, products(name, cover_photo_url), employees!work_logs_employee_id_fkey(name)')
       .order('logged_at', { ascending: false })
     const todayStr = new Date().toDateString()
     setTodayLogs((today || []).filter(l => new Date(l.logged_at).toDateString() === todayStr))
@@ -109,6 +110,7 @@ function EmployeeForm({ employee, onClose, onSaved }) {
   const [role, setRole] = useState(employee?.role || '')
   const [phone, setPhone] = useState(employee?.phone || '')
   const [salary, setSalary] = useState(employee?.monthly_salary ?? '')
+  const [payType, setPayType] = useState(employee?.pay_type || 'monthly')
   const [file, setFile] = useState(null)
   const [saving, setSaving] = useState(false)
 
@@ -126,14 +128,14 @@ function EmployeeForm({ employee, onClose, onSaved }) {
         monthly_salary: salary === '' ? null : Number(salary),
         photo_url,
       }
-      if (isEdit) {
-        await supabase.from('employees').update(payload).eq('id', employee.id)
-      } else {
-        await supabase.from('employees').insert(payload)
-      }
+      if (payType !== 'monthly' || employee?.pay_type) payload.pay_type = payType   // column added by migration 008
+      must(isEdit
+        ? await supabase.from('employees').update(payload).eq('id', employee.id)
+        : await supabase.from('employees').insert(payload), 'Saving team member')
+      toast(`${payload.name} saved`, 'success')
       onSaved()
     } catch (err) {
-      alert('Could not save: ' + err.message)
+      toast(err.message, 'error')
     } finally {
       setSaving(false)
     }
@@ -145,10 +147,10 @@ function EmployeeForm({ employee, onClose, onSaved }) {
     if (!confirm(`Remove "${employee.name}" from the team? Their past work history is kept.`)) return
     setSaving(true)
     try {
-      await supabase.from('employees').update({ active: false }).eq('id', employee.id)
+      must(await supabase.from('employees').update({ active: false }).eq('id', employee.id), 'Removing')
       onSaved()
     } catch (err) {
-      alert('Could not remove: ' + err.message)
+      toast(err.message, 'error')
     } finally {
       setSaving(false)
     }
@@ -167,9 +169,17 @@ function EmployeeForm({ employee, onClose, onSaved }) {
         <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Embroidery Operator" className={inputClass} />
         <label className={labelClass}>Phone</label>
         <input value={phone} onChange={(e) => setPhone(e.target.value)} className={inputClass} />
-        <label className={labelClass}>Monthly Salary (₹)</label>
-        <input value={salary} onChange={(e) => setSalary(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal"
-          className={inputClass} placeholder="optional — used to calculate cost per piece" />
+        <label className={labelClass}>Paid by</label>
+        <div className="grid grid-cols-2 gap-1 bg-gray-950 border border-gray-800 rounded-xl p-1 mb-3">
+          {[['monthly', 'Monthly salary'], ['piece', 'Per piece']].map(([k, l]) => (
+            <button type="button" key={k} onClick={() => setPayType(k)} className={`py-1.5 rounded-lg text-xs font-bold ${payType === k ? 'bg-brand-600 text-white' : 'text-gray-400'}`}>{l}</button>
+          ))}
+        </div>
+        {payType === 'monthly' ? <>
+          <label className={labelClass}>Monthly Salary (₹)</label>
+          <input value={salary} onChange={(e) => setSalary(e.target.value.replace(/[^0-9.]/g, ''))} inputMode="decimal"
+            className={inputClass} placeholder="used for cost per piece and Payroll in Accounts" />
+        </> : <p className="text-xs text-gray-400 mb-3">Pay is worked out from the pieces they log × the rates in Settings → Piece rates.</p>}
         <FormActions onCancel={onClose} saving={saving} onDelete={isEdit ? remove : null} saveLabel={isEdit ? 'Save' : 'Add'} />
       </form>
     </Modal>

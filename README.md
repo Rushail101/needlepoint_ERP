@@ -1,70 +1,55 @@
-# Needle Point ERP
+# Needle Point ERP — operations
 
-Simple, photo-first ERP for garment production: brands, garments (with photos + size/qty), team, and daily work logging (screen printing, embroidery, sampling, sample changes).
+Photo-first production ERP for Needle Point: orders, garments, work logs, fabric, job work, team and brand portal. It shares a Supabase project with the accounts app (`accounts_erp` schema). See that repo's `MERGE_GUIDE.md`.
 
-## 1. Set up Supabase (free tier is enough to start)
+## 1. Database
 
-1. Go to supabase.com → New project.
-2. Once created, go to **SQL Editor** → paste the contents of `supabase/schema.sql` → Run.
-3. Go to **Storage** → New bucket → name it exactly `photos` → toggle **Public bucket ON**.
-4. Go to **Project Settings → API** → copy the **Project URL** and **anon public key**.
+In the Supabase **SQL Editor**, run these in order. Every file is safe to run again.
 
-## 2. Configure the app
+1. `supabase/schema.sql` (fresh project only), then `migration_002` … `migration_006` if they haven't been run yet.
+2. `supabase/migration_007_schema_catchup.sql`
+3. `supabase/migration_008_production_upgrades.sql`
+4. Set the admin PIN: `select public.ops_bootstrap_admin('your-pin');`
+   - This replaces `VITE_ADMIN_PIN`.
+   - You can change it later in **Settings**.
+5. *(Optional, recommended once everything works)* `supabase/migration_009_lockdown.sql`
+   - This locks every table to signed-in sessions (see "Security" below).
+   - `migration_009_undo.sql` reverses it.
 
-Copy `.env.example` to `.env` and fill in:
+Storage: keep a **public** bucket named `photos`.
+
+## 2. App environment
 
 ```
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
-VITE_ADMIN_PIN=1234   # your admin PIN(s), comma-separated for multiple admins
 ```
 
-## 3. Run locally
+Remove `VITE_ADMIN_PIN`, `VITE_TELEGRAM_BOT_TOKEN` and `VITE_TELEGRAM_CHAT_ID` from Netlify/Vercel. Anything starting with `VITE_` ships to every visitor's browser.
+
+## 3. Telegram alerts and the evening digest (optional)
 
 ```
-npm install
-npm run dev
+supabase secrets set TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... DIGEST_SECRET=<long random text>
+supabase functions deploy notify
+supabase functions deploy daily-digest --no-verify-jwt
 ```
 
-## 4. Deploy
+Then enable `pg_cron` and `pg_net` (Database → Extensions). Fill in your project ref and `DIGEST_SECRET` in `supabase/daily_digest_schedule.sql` and run it. Each evening at 8 pm IST you get a summary on Telegram: pieces made today, late orders, overdue job work and samples waiting.
 
-**Netlify / Vercel** (either works the same way):
-- Push this folder to a GitHub repo.
-- Import the repo in Netlify or Vercel.
-- Build command: `npm run build`, Output directory: `dist`.
-- Add the same environment variables (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_ADMIN_PIN`) in the site's environment settings.
-- Deploy.
+Use **Settings → Send test message** to check that alerts work.
 
-**Render**: Create a new Static Site, same build command/output dir, same env vars.
+## 4. Run / deploy
 
-## What's in v1
+`npm install && npm run dev` locally. On Netlify/Vercel, use build `npm run build` with output `dist`.
 
-- **Home dashboard** — garment counts by status/stage, today's activity, samples pending 7+ days
-- **Brands** — name, logo, contact
-- **Garments** — photo, brand, status, production stage, style code, full photo gallery, size × quantity breakdown, search
-- **Team** — employees with photo + role, and a per-person work summary (entries, total pieces, by type, filterable by week/month/all-time)
-- **Work Log** — guided flow: tap the garment photo → tap the person → tap the work type (Screen Printing / Embroidery / Sampling / Sample Change / Stitching / Other) → optional quantity, photo, notes
-- **Sample Versions** — per garment, a running v1/v2/v3... history of sample rounds with photo + what changed + approval status
-- **QR codes** — each garment has one that opens straight into Work Log with that garment pre-selected
-- **PDF export** — one-click summary of a garment's photos, sizes, work history, and sample versions
-- **Roles** — Admin (everything, incl. managing who has access), Floor Manager (logs/edits work, updates stage, view-only elsewhere), Worker (views Garments and Brands only). The admin's own PIN is set via env var; floor manager and worker PINs are created and managed by the admin from the Access tab — no redeploy needed to add someone.
+## Security
 
-## Linked with the accounts app
-
-When this app shares a Supabase project with the Needle Point accounts app (see that repo's `MERGE_GUIDE.md`):
-
-- **Brands:** there's a *Billing details* section (GSTIN with auto-filled state and PAN, address, email, payment terms). It stays in sync with the brand's client party in accounts.
-- **Orders (admin):** each order shows a billing badge (*Proforma sent / Advance / Due ₹… / Paid*), and the order popup lists its invoices and challans.
-- **Dispatches:**
-  - Each dispatch is marked *Invoiced* or *On challan*.
-  - A dispatch that's already on an invoice can't be deleted.
-  - Every new dispatch sends a Telegram "ready to invoice" alert, if Telegram is set up.
-- **Billing itself** (proformas, invoices, challans, payroll) happens in Accounts → Production Orders / Payroll.
-
-Run `supabase/migration_007_schema_catchup.sql` on a fresh project. It records tables the app already uses (`garments`, `shipments`, order fields, brand portal) that the original `schema.sql` never created.
-
-## Natural next additions (not built yet, easy to bolt on later)
-
-- Low-stock / pending-quantity alerts on the dashboard
-- Auto-select the logged-in floor manager as the "person" in Work Log instead of picking from a list each time
-- A stronger security model if this ever needs to survive a determined bad actor rather than just keep honest people on the right screens (current PIN system is a convenience gate, not hardened auth — see note in README below)
+- **Logins are checked in the database.** PINs and portal passwords are stored as bcrypt hashes. They are never sent to the browser and never shown on screen.
+- **Each login gets a session token,** and the app sends it with every request.
+- **Repeated wrong guesses are blocked:** 20 per network per 15 minutes.
+- **With 009 applied, tables are locked to roles:**
+  - Visitors with no login see nothing.
+  - Floor managers and workers see production but not the access list or the accounts data.
+  - Brand clients see only their own orders and invoices.
+  - The accounts app needs to be signed in with Supabase Auth (email) to keep working.

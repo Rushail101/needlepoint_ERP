@@ -1,5 +1,6 @@
+import { toast } from '../components/Toast'
 import { useEffect, useState } from 'react'
-import { supabase, uploadPhoto } from '../supabaseClient.js'
+import { supabase, uploadPhoto, must } from '../supabaseClient.js'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
 import { useAuth } from '../components/PinGate.jsx'
 import { can } from '../permissions.js'
@@ -198,14 +199,12 @@ export function GarmentCatalogForm({ brands, garment, onClose, onSaved }) {
         payload.default_price_per_piece = defaultPrice !== '' ? Number(defaultPrice) : null
       }
 
-      if (isEdit) {
-        await supabase.from('garments').update(payload).eq('id', garment.id)
-      } else {
-        await supabase.from('garments').insert(payload)
-      }
+      must(isEdit
+        ? await supabase.from('garments').update(payload).eq('id', garment.id)
+        : await supabase.from('garments').insert(payload), 'Saving garment')
       onSaved()
     } catch (err) {
-      alert('Could not save garment: ' + err.message)
+      toast('Could not save garment: ' + err.message, 'error')
     } finally {
       setSaving(false)
     }
@@ -215,10 +214,10 @@ export function GarmentCatalogForm({ brands, garment, onClose, onSaved }) {
     if (!confirm(`Delete "${garment.name}" from catalog? Existing orders referencing it are retained.`)) return
     setSaving(true)
     try {
-      await supabase.from('garments').delete().eq('id', garment.id)
+      must(await supabase.from('garments').delete().eq('id', garment.id), 'Deleting garment')
       onSaved()
     } catch (err) {
-      alert('Could not delete: ' + err.message)
+      toast('Could not delete: ' + err.message, 'error')
     } finally {
       setSaving(false)
     }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase, uploadPhoto } from '../supabaseClient.js'
+import { toast } from '../components/Toast.jsx'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
 import { useAuth } from '../components/PinGate.jsx'
 import { can } from '../permissions.js'
@@ -51,11 +52,11 @@ export default function Brands() {
             <div className="min-w-0">
               <p className="font-semibold text-sm truncate text-gray-100">{b.name}</p>
               {b.contact_person && <p className="text-xs text-gray-400 truncate">{b.contact_person}</p>}
-              {b.portal_password && (
-                <span className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded bg-brand-950 border border-brand-800/60 text-brand-300 font-mono">
-                  🔑 Portal Set
-                </span>
-              )}
+              <div className="flex flex-wrap gap-1 mt-1">
+                {b.portal_active && <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-950 border border-brand-800/60 text-brand-300">🔑 Portal on</span>}
+                {b.gstin ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 font-mono">{b.gstin}</span>
+                  : <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-900 text-amber-300">no GSTIN</span>}
+              </div>
             </div>
           </div>
         ))}
@@ -77,10 +78,18 @@ function BrandForm({ brand, onClose, onSaved }) {
   const [name, setName] = useState(brand?.name || '')
   const [contact, setContact] = useState(brand?.contact_person || '')
   const [phone, setPhone] = useState(brand?.contact_phone || '')
-  const [portalPassword, setPortalPassword] = useState(brand?.portal_password || '')
-  const [portalActive, setPortalActive] = useState(brand?.portal_active ?? true)
-  const [showPassword, setShowPassword] = useState(false)
+  // Portal passwords are write-only now (hashed in the database, migration 008).
+  const [portalPassword, setPortalPassword] = useState('')
+  const [hasPassword, setHasPassword] = useState(false)
+  const [portalActive, setPortalActive] = useState(brand?.portal_active ?? false)
   const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (brand?.id) supabase.rpc('ops_has_portal_password', { p_brand_id: brand.id }).then(({ data }) => setHasPassword(!!data))
+  }, [brand?.id])
+  const generate = () => {
+    const words = ['cotton', 'denim', 'stitch', 'thread', 'linen', 'velvet', 'indigo', 'button']
+    setPortalPassword(`${words[Math.floor(Math.random() * words.length)]}-${Math.floor(1000 + Math.random() * 9000)}`)
+  }
   const [file, setFile] = useState(null)
   const [saving, setSaving] = useState(false)
   // Billing details — synced to the client party in the accounts app
@@ -119,7 +128,6 @@ function BrandForm({ brand, onClose, onSaved }) {
         name: name.trim(),
         contact_person: contact.trim() || null,
         contact_phone: phone.trim() || null,
-        portal_password: portalPassword.trim() || null,
         portal_active: portalActive,
         logo_url,
       }
@@ -135,15 +143,20 @@ function BrandForm({ brand, onClose, onSaved }) {
 
       // supabase-js reports failures in { error } rather than throwing — they
       // used to be ignored, so a failed save looked like it worked.
-      const { error } = isEdit
-        ? await supabase.from('brands').update(payload).eq('id', brand.id)
-        : await supabase.from('brands').insert(payload)
+      const { data: saved, error } = isEdit
+        ? await supabase.from('brands').update(payload).eq('id', brand.id).select().single()
+        : await supabase.from('brands').insert(payload).select().single()
+      if (!error && portalPassword.trim()) {
+        const { error: pwErr } = await supabase.rpc('ops_set_portal_password', { p_brand_id: saved.id, p_password: portalPassword.trim() })
+        if (pwErr) throw new Error('Brand saved, but the portal password was not: ' + pwErr.message)
+        toast(`Portal password set for ${saved.name} — share it with them now; it can't be shown again.`, 'success', 7000)
+      }
       if (error) throw new Error(/column .* does not exist|schema cache/i.test(error.message)
         ? `${error.message} — run the accounts link SQL (sql/integration/001_link_operations.sql) to enable billing fields.`
         : error.message)
       onSaved()
     } catch (err) {
-      alert('Could not save: ' + err.message)
+      toast('Could not save: ' + err.message, 'error')
     } finally {
       setSaving(false)
     }
@@ -157,7 +170,7 @@ function BrandForm({ brand, onClose, onSaved }) {
       if (error) throw error
       onSaved()
     } catch (err) {
-      alert('Could not delete: ' + err.message)
+      toast('Could not delete: ' + err.message, 'error')
     } finally {
       setSaving(false)
     }
@@ -238,48 +251,23 @@ function BrandForm({ brand, onClose, onSaved }) {
           <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={2} className={inputClass} />
         </div>
 
-        {/* Client Portal Password & Access Controls */}
+        {/* Client portal: password is set here and never shown again */}
         <div className="bg-gray-950 border border-gray-800 rounded-xl p-3.5 mb-4">
           <div className="flex items-center justify-between mb-2">
-            <label className="text-xs font-bold text-gray-300 uppercase tracking-wider">
-              Client Portal Password
-            </label>
-            {portalPassword && (
-              <button
-                type="button"
-                onClick={handleCopy}
-                className="text-[11px] text-brand-400 hover:text-brand-300 font-semibold"
-              >
-                {copied ? '✓ Copied!' : '📋 Copy'}
-              </button>
-            )}
+            <label className="text-xs font-bold text-gray-300 uppercase tracking-wider">Client portal</label>
+            <span className={`text-[11px] font-semibold ${hasPassword ? 'text-emerald-400' : 'text-gray-500'}`}>{hasPassword ? '✓ password set' : 'no password yet'}</span>
           </div>
-
-          <div className="relative mb-2">
-            <input
-              type={showPassword ? 'text' : 'password'}
-              value={portalPassword}
-              onChange={(e) => setPortalPassword(e.target.value)}
-              placeholder="No password set yet"
-              className={inputClass}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-2.5 text-xs text-gray-400 hover:text-gray-200"
-            >
-              {showPassword ? 'Hide' : 'View'}
-            </button>
+          <div className="flex gap-2 mb-1">
+            <input type="text" value={portalPassword} onChange={(e) => setPortalPassword(e.target.value)} autoComplete="off"
+              placeholder={hasPassword ? 'Type a new password to replace it' : 'Set a password (6+ characters)'} className={inputClass} />
+            <button type="button" onClick={generate} className="mb-3 px-3 rounded-xl bg-gray-800 border border-gray-700 text-gray-200 text-xs whitespace-nowrap">Generate</button>
+            {portalPassword && <button type="button" onClick={handleCopy} className="mb-3 px-3 rounded-xl bg-gray-800 border border-gray-700 text-brand-300 text-xs whitespace-nowrap">{copied ? '✓' : 'Copy'}</button>}
           </div>
-
+          {portalPassword && <p className="text-[11px] text-amber-300 mb-2">Copy it now and send it to the brand — after saving it can't be viewed again.</p>}
           <label className="flex items-center gap-2 text-xs text-gray-400">
-            <input
-              type="checkbox"
-              checked={portalActive}
-              onChange={(e) => setPortalActive(e.target.checked)}
-              className="rounded border-gray-700 bg-gray-900 text-brand-600 focus:ring-brand-500"
-            />
-            <span>Portal Login Enabled</span>
+            <input type="checkbox" checked={portalActive} onChange={(e) => setPortalActive(e.target.checked)}
+              className="rounded border-gray-700 bg-gray-900 text-brand-600 focus:ring-brand-500" />
+            <span>Portal login enabled (brand name + password)</span>
           </label>
         </div>
 

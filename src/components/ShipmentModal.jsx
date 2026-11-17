@@ -1,3 +1,4 @@
+import { toast } from './Toast'
 import { useState, useEffect } from 'react'
 import Modal, { inputClass, labelClass } from './Modal.jsx'
 import { supabase } from '../supabaseClient.js'
@@ -54,7 +55,7 @@ export default function ShipmentModal({ product, sizes, onClose, onUpdated }) {
   const handleAddShipment = async (e) => {
     e.preventDefault()
     if (currentBatchTotal <= 0) {
-      alert('Please enter a quantity for at least one size.')
+      toast('Please enter a quantity for at least one size.', 'error')
       return
     }
 
@@ -91,7 +92,7 @@ export default function ShipmentModal({ product, sizes, onClose, onUpdated }) {
       await loadShipments()
       if (onUpdated) onUpdated()
     } catch (err) {
-      alert('Could not record dispatch: ' + err.message)
+      toast('Could not record dispatch: ' + err.message, 'error')
     } finally {
       setSaving(false)
     }
@@ -100,10 +101,10 @@ export default function ShipmentModal({ product, sizes, onClose, onUpdated }) {
   const handleDelete = async (s) => {
     // A dispatch already on a tax invoice is part of the accounts — removing it
     // here would leave the invoice and the dispatch log disagreeing.
-    if (s.invoice_id) { alert('This dispatch is already on a tax invoice. Cancel or correct the invoice in the accounts app first.'); return }
+    if (s.invoice_id) { toast('This dispatch is already on a tax invoice. Cancel or correct the invoice in the accounts app first.', 'error'); return }
     if (!confirm(s.challan_id ? 'This dispatch is on a delivery challan. Remove it anyway?' : 'Remove this dispatch record?')) return
     const { error } = await supabase.from('shipments').delete().eq('id', s.id)
-    if (error) alert('Could not remove: ' + error.message)
+    if (error) toast('Could not remove: ' + error.message, 'error')
     await loadShipments()
     if (onUpdated) onUpdated()
   }

@@ -1,10 +1,18 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../supabaseClient.js'
+import { supabase, must } from '../supabaseClient.js'
+import { toast } from '../components/Toast.jsx'
 import Modal, { FormActions, inputClass, labelClass } from '../components/Modal.jsx'
 
 const ROLE_LABEL = {
   floor_manager: { text: 'Floor Manager', color: 'bg-blue-900/50 text-blue-300' },
   worker: { text: 'Worker', color: 'bg-gray-800 text-gray-400' },
+}
+
+// PINs are stored hashed (migration 008) and set through ops_set_pin, which
+// also refuses a PIN someone else already uses. They can't be shown back.
+async function setPin(id, pin) {
+  const { error } = await supabase.rpc('ops_set_pin', { p_pin_id: id, p_pin: pin })
+  if (error) throw new Error(error.message)
 }
 
 export default function Access() {
@@ -31,7 +39,7 @@ export default function Access() {
         <h2 className="text-xl font-bold text-gray-100">Access</h2>
         <button onClick={() => setShowForm(true)} className="bg-brand-600 hover:bg-brand-700 text-white rounded-xl px-4 py-2 font-semibold text-sm">+ Add Person</button>
       </div>
-      <p className="text-sm text-gray-500 mb-4">Give someone a PIN and role. Share the PIN with them directly — that's all they need to log in.</p>
+      <p className="text-sm text-gray-500 mb-4">Give someone a PIN and role, and tell them the PIN yourself. PINs are stored scrambled, so they can't be looked up later — if someone forgets theirs, set a new one. Link the login to a Team member so Work Log picks them automatically.</p>
 
       <div className="space-y-2">
         {people.map(p => (
@@ -42,7 +50,7 @@ export default function Access() {
             </div>
             <div className="min-w-0 flex-1">
               <p className="font-semibold text-sm text-gray-100">{p.name}</p>
-              <p className="text-xs text-gray-500 font-mono">PIN: {p.pin}</p>
+              <p className="text-xs text-gray-500">{p.employee_id ? 'Linked to Team · ' : ''}PIN set · tap to change</p>
             </div>
             <span className={`text-[11px] px-2 py-0.5 rounded-full ${ROLE_LABEL[p.role]?.color || 'bg-gray-800 text-gray-400'}`}>
               {ROLE_LABEL[p.role]?.text || p.role}
@@ -64,7 +72,7 @@ function AccessForm({ person, employees, onClose, onSaved }) {
   const [source, setSource] = useState(person?.employee_id ? 'team' : (employees.length > 0 && !isEdit ? 'team' : 'custom'))
   const [employeeId, setEmployeeId] = useState(person?.employee_id || employees[0]?.id || '')
   const [customName, setCustomName] = useState(isEdit && !person?.employee_id ? person.name : '')
-  const [pin, setPin] = useState(person?.pin || '')
+  const [pin, setPinValue] = useState('')
   const [role, setRole] = useState(person?.role || 'floor_manager')
   const [active, setActive] = useState(person?.active ?? true)
   const [saving, setSaving] = useState(false)
@@ -76,27 +84,31 @@ function AccessForm({ person, employees, onClose, onSaved }) {
 
   const save = async (e) => {
     e.preventDefault()
-    if (!resolvedName || !pin.trim()) return
+    if (!resolvedName || (!isEdit && pin.trim().length < 4)) { setError('Name and a PIN of at least 4 digits are needed'); return }
     setSaving(true)
     setError('')
+    let createdId = null
     try {
       const payload = {
         name: resolvedName,
-        pin: pin.trim(),
         role,
         active,
-        employee_id: source === 'team' ? employeeId : null,
+        employee_id: source === 'team' ? employeeId : (isEdit ? person.employee_id : null),
       }
       if (isEdit) {
-        const { error: err } = await supabase.from('access_pins').update(payload).eq('id', person.id)
-        if (err) throw err
+        must(await supabase.from('access_pins').update(payload).eq('id', person.id), 'Saving')
+        if (pin.trim()) await setPin(person.id, pin.trim())
       } else {
-        const { error: err } = await supabase.from('access_pins').insert(payload)
-        if (err) throw err
+        const row = must(await supabase.from('access_pins').insert(payload).select().single(), 'Saving')
+        createdId = row.id
+        await setPin(row.id, pin.trim())
       }
+      toast(isEdit ? `${resolvedName} updated` : `${resolvedName} can now sign in with their PIN`, 'success')
       onSaved()
     } catch (err) {
-      setError(err.message.includes('duplicate') ? 'That PIN is already in use — pick a different one.' : err.message)
+      // don't leave a login behind without a working PIN
+      if (createdId) await supabase.from('access_pins').delete().eq('id', createdId)
+      setError(err.message)
     } finally {
       setSaving(false)
     }
@@ -106,10 +118,10 @@ function AccessForm({ person, employees, onClose, onSaved }) {
     if (!confirm(`Remove access for "${person.name}"? Their PIN will stop working immediately.`)) return
     setSaving(true)
     try {
-      await supabase.from('access_pins').delete().eq('id', person.id)
+      must(await supabase.from('access_pins').delete().eq('id', person.id), 'Removing')
       onSaved()
     } catch (err) {
-      alert('Could not remove: ' + err.message)
+      toast(err.message, 'error')
     } finally {
       setSaving(false)
     }
@@ -156,13 +168,13 @@ function AccessForm({ person, employees, onClose, onSaved }) {
           </>
         )}
 
-        <label className={labelClass}>PIN*</label>
-        <input value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} inputMode="numeric"
-          className={inputClass} placeholder="e.g. 4521" required />
+        <label className={labelClass}>{isEdit ? 'New PIN (leave blank to keep the current one)' : 'PIN*'}</label>
+        <input value={pin} onChange={(e) => setPinValue(e.target.value.replace(/\D/g, ''))} inputMode="numeric" autoComplete="off"
+          className={inputClass} placeholder={isEdit ? '••••' : 'at least 4 digits'} required={!isEdit} />
         <label className={labelClass}>Role</label>
         <select value={role} onChange={(e) => setRole(e.target.value)} className={inputClass}>
           <option value="floor_manager">Floor Manager — logs & edits work, updates garment stage</option>
-          <option value="worker">Worker — view garments and brands only</option>
+          <option value="worker">Worker — sees orders and logs their own work</option>
         </select>
         {isEdit && (
           <label className="flex items-center gap-2 mb-3 text-sm text-gray-300">
