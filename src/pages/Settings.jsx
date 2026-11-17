@@ -5,6 +5,7 @@ import { toast } from '../components/Toast.jsx'
 import { WORK_TYPES } from '../workTypes.js'
 import { sendTelegramMessage } from '../telegram.js'
 import { inr } from '../production.js'
+import ImportOldProject from '../components/ImportOldProject.jsx'
 
 // Admin-only: pricing defaults, piece rates, admin PIN, Telegram test.
 export default function Settings() {
@@ -62,6 +63,8 @@ export default function Settings() {
   return (
     <div className="space-y-4 max-w-2xl">
       <h2 className="text-xl font-bold text-gray-100">Settings</h2>
+
+      <ImportOldProject />
 
       <form onSubmit={saveGeneral} className={card}>
         <p className="text-xs uppercase font-bold text-gray-400 tracking-wider mb-3">Orders</p>

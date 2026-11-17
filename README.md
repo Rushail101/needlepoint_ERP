@@ -9,7 +9,7 @@ It runs in the same Supabase project as the accounts app, in its own schema (`op
 1. **SQL Editor:** run `supabase/ops_install.sql`. It is safe to re-run and touches only the `ops` schema, plus the `ops-photos` bucket.
 2. **Project Settings → API → Exposed schemas:** add `ops`.
 3. **Admin PIN:** `select ops.ops_bootstrap_admin('your-pin');`. Change it later in Settings.
-4. **Accounts link:** run `accounts_app/sql/integration/001_link_operations.sql` from the accounts app.
+4. **Accounts link:** run `accounts_app/sql/INVOICE_ERP_COMPLETE.sql` from the accounts app.
 5. **App env:** `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. Nothing else: no PINs or tokens in `VITE_` vars, which ship to every browser.
 6. **Optional:** Telegram (MOVE_GUIDE §7) and the lockdown (MOVE_GUIDE §9).
 

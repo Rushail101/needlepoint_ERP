@@ -10,45 +10,40 @@ In the **shared project → SQL Editor**, open `supabase/ops_install.sql`, paste
 
 Then go to **Project Settings → API → Exposed schemas** and add `ops`. Keep everything that's already listed (`public`, `accounts_erp`, your other schemas).
 
-## 2. Bring your data across (skip if you want to start fresh)
+## 2. Set the admin PIN
 
-You need Node 18 or newer on your computer. No `npm install` is needed. From the app folder, run:
+In the SQL editor: `select ops.ops_bootstrap_admin('your-pin');`
 
-```
-OLD_URL=https://<old-ref>.supabase.co  OLD_SERVICE_KEY=<old service_role key> \
-NEW_URL=https://<shared-ref>.supabase.co  NEW_SERVICE_KEY=<shared service_role key> \
-node supabase/move/move-data.mjs
-```
+## 3. Run the invoice-app SQL
 
-The service_role keys are in **Project Settings → API**. They are secret, so don't paste them anywhere else.
+Run `accounts_app/sql/INVOICE_ERP_COMPLETE.sql` (in the InvoiceAppV2 folder) in the shared project's SQL editor. It has every accounts update plus the link with operations, in one file.
 
-The script:
-- copies every table into `ops`;
-- copies every photo (logos, garments, work-log photos, team photos) into `ops-photos` and rewrites the links;
-- keeps the stage dates.
-
-It never changes the old project, and it's safe to run again. Any photo it can't copy is listed and keeps its old link.
-
-**Do this before step 4.** The script stops if the accounts link is already set up, so brands don't get turned into parties twice.
-
-## 3. Finish the logins
-
-In the shared project's SQL editor:
-
-1. Run `supabase/ops_install.sql` **once more**. This turns old plain-text PINs and portal passwords into secure hashes, so everyone's existing PIN keeps working.
-2. If the script said the admin PIN didn't carry over, set it: `select ops.ops_bootstrap_admin('your-pin');`
-
-## 4. Link to the accounts app
-
-Run `accounts_app/sql/integration/001_link_operations.sql` (in the InvoiceAppV2 folder) in the shared project's SQL editor.
-
-## 5. Point both apps at the shared project and deploy
+## 4. Point the apps at the shared project and deploy
 
 - **Operations app (Netlify/Vercel env):**
   - Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to the shared project's values.
   - Delete `VITE_ADMIN_PIN`, `VITE_TELEGRAM_BOT_TOKEN` and `VITE_TELEGRAM_CHAT_ID`.
   - Redeploy.
 - **Accounts app:** env unchanged (it's already on this project). Deploy the new version.
+
+## 5. Import your old data (skip if starting fresh)
+
+1. Open the new operations app and log in with the admin PIN.
+2. Go to **Settings → Import from old project → Set up import**.
+3. Paste the **old** project's URL and **anon public** key. That's the same pair the old app used as `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`, also under Project Settings → API in the old project. If the old project is paused, click **Restore** on it first.
+4. Press **Import** and keep the tab open until it says Done.
+
+The import:
+- copies every brand, order, size, team member, work log, dispatch and sample;
+- copies the photos into `ops-photos` and updates their links;
+- keeps the stage dates;
+- re-sets staff PINs and brand portal passwords securely, so everyone logs in as before.
+
+At the end it lists anything that needs your attention: a photo it couldn't copy, or a PIN that clashes with another one. It never changes the old project, and you can run it again safely.
+
+**Do this before step 6.** The import refuses to run once the accounts setup is done, so brands don't get turned into parties automatically.
+
+*(Alternative for large amounts of data: the command-line script `supabase/move/move-data.mjs`; instructions at the top of that file.)*
 
 ## 6. Match brands with your parties
 
