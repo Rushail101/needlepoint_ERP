@@ -7,6 +7,8 @@ import { inputClass, labelClass } from '../components/Modal.jsx'
 import { useAuth } from '../components/PinGate.jsx'
 import { sendTelegramMessage } from '../telegram.js'
 import { buildBatchSummaryText } from '../orderSummary.js'
+import { orderKeyOf } from '../billing.js'
+import { canMakeProforma, createOrderProforma, printOrderDocument, loadLinkedBrandIds } from '../proforma.js'
 
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL']
 // Defaults; the real values come from Settings (ops_settings) when available.
@@ -24,6 +26,12 @@ export default function NewOrder() {
   const [poNumber, setPoNumber] = useState('')
   const [status, setStatus] = useState('in_production')
   const [submitting, setSubmitting] = useState(false)
+  // Proforma straight from the order (admin / floor manager, once the brand is
+  // linked to a client in Accounts). null = accounts link not set up.
+  const mayProforma = canMakeProforma(user)
+  const [linkedBrands, setLinkedBrands] = useState(null)
+  const [makeProforma, setMakeProforma] = useState(true)
+  useEffect(() => { if (mayProforma) loadLinkedBrandIds().then(setLinkedBrands) }, [mayProforma])
   const [dueDate, setDueDate] = useState('')
   const [, setSettingsLoaded] = useState(false)
   useEffect(() => {
@@ -141,6 +149,8 @@ export default function NewOrder() {
     setItems((prev) => prev.filter((_, i) => i !== idx))
   }
 
+  const proformaOn = mayProforma && makeProforma && !!linkedBrands?.has(currentBrandId)
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!currentBrandId) {
@@ -159,6 +169,7 @@ export default function NewOrder() {
     try {
       const finalBrandId = currentBrandId
       const cleanPo = poNumber.trim().toUpperCase() || null
+      const orderKeys = new Set()
 
       for (const it of items) {
         let finalPhoto = it.coverPhotoUrl || null
@@ -225,6 +236,7 @@ export default function NewOrder() {
 
         if (pErr) throw new Error(/due_date/.test(pErr.message || '') ? 'The database needs migration_008 (delivery dates) — ask the admin to run it.' : (pErr.message || 'Error creating product record'))
 
+        orderKeys.add(orderKeyOf(prod))
         if (validSizes.length > 0) {
           const sizeInserts = validSizes.map((s) => ({
             product_id: prod.id,
@@ -262,6 +274,19 @@ export default function NewOrder() {
 
       const summaryText = buildBatchSummaryText({ batch: batchData, brandName }) + (dueDate ? `\n*Delivery by:* ${new Date(dueDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : '')
       sendTelegramMessage(summaryText, 'Markdown')
+
+      if (proformaOn) {
+        // one proforma per order (garments without a PO are separate orders)
+        for (const key of orderKeys) {
+          try {
+            const pf = await createOrderProforma(key)
+            toast(`Proforma ${pf.number} made: ₹${Number(pf.total).toLocaleString('en-IN')}${pf.missing_rates ? '. Some garments had no rate, so check it in Accounts' : ''}`, pf.missing_rates ? 'info' : 'success', 7000)
+            await printOrderDocument(pf.id)
+          } catch (err) {
+            toast(`Order placed, but the proforma wasn't made: ${err.message}`, 'error', 9000)
+          }
+        }
+      }
 
       navigate('/orders')
     } catch (err) {
@@ -615,6 +640,21 @@ export default function NewOrder() {
           </button>
         </div>
 
+        {mayProforma && linkedBrands && currentBrandId && (
+          linkedBrands.has(currentBrandId) ? (
+            <label className="flex items-start gap-3 bg-gray-900 border border-gray-800 rounded-2xl p-3.5 mb-3 cursor-pointer">
+              <input type="checkbox" checked={makeProforma} onChange={e => setMakeProforma(e.target.checked)} className="mt-0.5 w-4 h-4 accent-orange-600" />
+              <span>
+                <span className="block text-sm font-semibold text-gray-100">Make the proforma invoice now</span>
+                <span className="block text-[11px] text-gray-500">Same format as Accounts: HSN codes, GST (CGST+SGST or IGST), PI number and payment terms filled in automatically. Opens ready to download or print, and shows up in Accounts for the advance.</span>
+              </span>
+            </label>
+          ) : (
+            <p className="text-[11px] text-amber-300 bg-amber-950/30 border border-amber-900/60 rounded-xl px-3 py-2 mb-3">
+              This brand isn't linked to a client in Accounts yet, so no proforma can be made. Link it in Accounts → Parties → Brand links.
+            </p>
+          )
+        )}
         <button
           type="submit"
           disabled={submitting}

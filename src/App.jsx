@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import TelegramConnect from './components/TelegramConnect.jsx'
 import { Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import PinGate, { useAuth } from './components/PinGate.jsx'
 import Modal, { inputClass, labelClass } from './components/Modal.jsx'
@@ -85,6 +86,7 @@ function MainShell() {
   const { user, logout } = useAuth()
   const isClient = user?.role === 'client'
   const [showSecurity, setShowSecurity] = useState(false)
+  const [showTelegram, setShowTelegram] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const location = useLocation()
 
@@ -115,6 +117,7 @@ function MainShell() {
           </div>
           <div className="flex items-center gap-3">
             {isClient && <button onClick={() => setShowSecurity(true)} className="text-xs text-gray-400 hover:text-gray-200">🔑 Password</button>}
+            {!isClient && <button onClick={() => setShowTelegram(true)} className="text-xs text-gray-400 hover:text-[#5bbfef] font-semibold" title="Log work and update orders from Telegram">📲 Telegram</button>}
             {!isClient && <span className="text-xs text-gray-400 font-medium hidden sm:inline">{user?.name}</span>}
             <button onClick={logout} className="text-xs text-gray-400 hover:text-red-400 underline transition">Log out</button>
           </div>
@@ -176,6 +179,7 @@ function MainShell() {
         </Modal>
       )}
 
+      {showTelegram && <TelegramConnect user={user} onClose={() => setShowTelegram(false)} />}
       {showSecurity && <ClientSecurityModal user={user} onClose={() => setShowSecurity(false)} />}
       <Toaster />
     </div>

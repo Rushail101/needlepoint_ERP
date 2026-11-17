@@ -8,6 +8,8 @@ import { useAuth } from '../components/PinGate.jsx'
 import { can } from '../permissions.js'
 import { exportBatchOrderPDF } from '../pdfExport.js'
 import { orderKeyOf, loadOrderBilling, loadOrderDocuments, billingBadge } from '../billing.js'
+import OrderDocs from '../components/OrderDocs.jsx'
+import { canMakeProforma } from '../proforma.js'
 import { deliveryStatus, isDone, todayISO, addDays } from '../production.js'
 
 const STATUS_LABEL = {
@@ -460,22 +462,9 @@ export default function Orders() {
             </button>
           </div>
 
-          {showFinancials && docs.length > 0 && (
-            <div className="bg-gray-950 border border-gray-800 rounded-xl p-3 mb-4">
-              <p className="text-xs uppercase font-bold text-gray-300 tracking-wider mb-2">Billing (from accounts)</p>
-              {docs.map(d => (
-                <div key={d.id} className="flex justify-between text-xs py-1 border-b border-gray-800 last:border-0">
-                  <span className="text-gray-300">
-                    <span className="font-mono text-brand-400">{d.number}</span>{' '}
-                    <span className="text-gray-500">{d.kind === 'challan' ? 'challan' : d.status === 'proforma' ? 'proforma' : 'invoice'} · {d.doc_date ? new Date(d.doc_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : ''}</span>
-                  </span>
-                  <span className="text-gray-200 font-semibold">
-                    ₹{Number(d.total || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                    {Number(d.paid) > 0 && <span className="text-emerald-400"> · paid ₹{Number(d.paid).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>}
-                  </span>
-                </div>
-              ))}
-            </div>
+          {showFinancials && (
+            <OrderDocs orderKey={orderKeyOf(selectedBatch.items[0])} docs={docs} canMake={canMakeProforma(user)}
+              onChanged={() => loadOrderDocuments(orderKeyOf(selectedBatch.items[0])).then(setDocs)} />
           )}
 
           <p className="text-xs text-gray-500 mb-2 font-medium">Garments in this order:</p>

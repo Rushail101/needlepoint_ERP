@@ -100,12 +100,44 @@ export default function Settings() {
         <p className="text-[11px] text-gray-500">Staff PINs are managed under Access. PINs are stored hashed — nobody can read them back, including you.</p>
       </form>
 
+      <TelegramPeople card={card} />
+
       <div className={card}>
         <p className="text-xs uppercase font-bold text-gray-400 tracking-wider mb-2">Telegram</p>
         <p className="text-[11px] text-gray-500 mb-3">Order, edit and dispatch alerts and the 8 pm daily digest go through the <code>ops-notify</code> and <code>ops-daily-digest</code> Supabase functions (see the README for setup).</p>
         <button onClick={async () => { await sendTelegramMessage('✅ Test message from Needle Point ERP'); toast('Test sent — check the Telegram group (nothing arrives if the function or secrets are not set up yet).', 'info', 6000) }}
           className="bg-gray-800 border border-gray-700 text-gray-100 rounded-xl px-4 py-2 text-xs font-bold">Send test message</button>
       </div>
+    </div>
+  )
+}
+
+// People connected to the Telegram bot, with Disconnect.
+function TelegramPeople({ card }) {
+  const [people, setPeople] = useState(null)
+  const load = async () => {
+    const { data, error } = await supabase.rpc('ops_telegram_users')
+    setPeople(error ? false : (data || []))
+  }
+  useEffect(() => { load() }, [])
+  if (people === false) return null   // bot SQL not installed yet
+  const ROLE = { admin: 'Admin', manager: 'Floor manager', tailor: 'Worker' }
+  return (
+    <div className={card}>
+      <p className="text-xs uppercase font-bold text-gray-400 tracking-wider mb-1">Telegram bot: connected people</p>
+      <p className="text-[11px] text-gray-500 mb-3">Each person connects themselves from <b>📲 Telegram</b> at the top of the app. Turning off someone's login under Access also stops their Telegram.</p>
+      {people === null && <p className="text-xs text-gray-500">Loading…</p>}
+      {people?.length === 0 && <p className="text-xs text-gray-500">Nobody yet.</p>}
+      {people?.map(p => (
+        <div key={p.tg_user_id} className="flex items-center justify-between text-xs py-1.5 border-b border-gray-800 last:border-0">
+          <span className="text-gray-200">{p.name} <span className="text-gray-500">· {ROLE[p.role] || p.role}{p.tg_name ? ` · Telegram: ${p.tg_name}` : ''}</span></span>
+          <button onClick={async () => {
+            if (!confirm(`Disconnect ${p.name}'s Telegram?`)) return
+            const { error } = await supabase.rpc('ops_telegram_unlink', { p_tg_user_id: p.tg_user_id })
+            if (error) toast(error.message, 'error'); else { toast('Disconnected', 'success'); load() }
+          }} className="text-red-400 hover:text-red-300 font-semibold">Disconnect</button>
+        </div>
+      ))}
     </div>
   )
 }

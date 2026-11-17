@@ -13,6 +13,8 @@ import { can } from '../permissions.js'
 import { toast } from '../components/Toast.jsx'
 import { deliveryStatus, sizeProgress, fmtDay, inr } from '../production.js'
 import { orderKeyOf, loadOrderDocuments } from '../billing.js'
+import OrderDocs from '../components/OrderDocs.jsx'
+import { canMakeProforma } from '../proforma.js'
 import { MaterialsPanel } from './Materials.jsx'
 import { JobWorkPanel } from './JobWork.jsx'
 
@@ -163,7 +165,7 @@ export default function ProductDetail() {
       {!isClient && activeTab === 'work' && <WorkLogsTab logs={logs} canLog={canLog} onOpenLogModal={() => setModal('log')} onReload={loadProduct} />}
       {!isClient && activeTab === 'materials' && <MaterialsPanel product={product} canEdit={can(user, 'manage_materials')} />}
       {!isClient && activeTab === 'jobwork' && <JobWorkPanel product={product} canEdit={can(user, 'manage_job_work')} />}
-      {showFinancials && activeTab === 'billing' && <BillingTab docs={docs} />}
+      {showFinancials && activeTab === 'billing' && <BillingTab docs={docs} orderKey={orderKeyOf(product)} canMake={canMakeProforma(user) && !isClient} onChanged={() => loadOrderDocuments(orderKeyOf(product)).then(setDocs)} />}
 
       {modal === 'ship' && <ShipmentModal product={product} sizes={sizes} onClose={() => setModal(null)} onUpdated={loadProduct} />}
       {modal === 'job' && <JobCardModal product={product} brandName={product.brands?.name} sizes={sizes} onClose={() => setModal(null)} />}
@@ -425,18 +427,8 @@ function WorkLogsTab({ logs, canLog, onOpenLogModal, onReload }) {
   )
 }
 
-function BillingTab({ docs }) {
-  if (!docs.length) return <p className="text-xs text-gray-500">No invoices or challans for this order yet. They're raised from Accounts → Production Orders.</p>
-  return (
-    <div className="space-y-2">
-      {docs.map(d => (
-        <div key={d.id} className="bg-gray-900 border border-gray-800 rounded-xl p-3 flex justify-between text-xs">
-          <span><span className="font-mono text-brand-400">{d.number}</span> <span className="text-gray-500">{d.kind === 'challan' ? 'challan' : d.status} · {fmtDay(d.doc_date)}</span></span>
-          <span className="text-gray-200 font-semibold">{inr(d.total)}{Number(d.paid) > 0 && <span className="text-emerald-400"> · paid {inr(d.paid)}</span>}</span>
-        </div>
-      ))}
-    </div>
-  )
+function BillingTab({ docs, orderKey, canMake, onChanged }) {
+  return <OrderDocs orderKey={orderKey} docs={docs} canMake={canMake} onChanged={onChanged} title="Proformas, invoices and challans" />
 }
 
 // Quick entry from the garment page (the full guided flow is the Work Log screen).
