@@ -5,9 +5,9 @@ export const cors = {
 };
 
 export async function sendTelegram(text: string, parseMode = 'HTML') {
-  const token = Deno.env.get('TELEGRAM_BOT_TOKEN');
-  const chat = Deno.env.get('TELEGRAM_CHAT_ID');
-  if (!token || !chat) return { ok: false, reason: 'TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set' };
+  const token = Deno.env.get('NP_TELEGRAM_BOT_TOKEN');
+  const chat = Deno.env.get('NP_TELEGRAM_CHAT_ID');
+  if (!token || !chat) return { ok: false, reason: 'NP_TELEGRAM_BOT_TOKEN / NP_TELEGRAM_CHAT_ID not set' };
   const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -22,7 +22,7 @@ export async function rpcAsUser(req: Request, fn: string, args: Record<string, u
   const anon = Deno.env.get('SUPABASE_ANON_KEY')!;
   const r = await fetch(`${url}/rest/v1/rpc/${fn}`, {
     method: 'POST',
-    headers: { apikey: anon, Authorization: `Bearer ${anon}`, 'Content-Type': 'application/json', 'x-ops-token': req.headers.get('x-ops-token') ?? '' },
+    headers: { apikey: anon, Authorization: `Bearer ${anon}`, 'Content-Type': 'application/json', 'Content-Profile': 'ops', 'x-ops-token': req.headers.get('x-ops-token') ?? '' },
     body: JSON.stringify(args),
   });
   return r.ok ? await r.json() : null;

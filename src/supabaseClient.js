@@ -9,7 +9,13 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 let sessionToken = null
 export function setSessionToken(token) { sessionToken = token || null }
 
+// The operations tables live in their own `ops` schema, so this app can share a
+// Supabase project with the accounts app and anything else without clashing.
+export const OPS_SCHEMA = 'ops'
+export const PHOTO_BUCKET = 'ops-photos'
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  db: { schema: OPS_SCHEMA },
   global: {
     fetch: (input, init = {}) => {
       const headers = new Headers(init.headers || {})
@@ -45,11 +51,13 @@ export async function compressImage(file, maxSide = 1600, quality = 0.82) {
   }
 }
 
-// Uploads a File to Storage and returns its public URL. Images are compressed first.
-export async function uploadPhoto(file, bucket = 'products') {
+// Uploads a File to the ops-photos bucket (in a folder, e.g. 'products' or
+// 'worklog') and returns its public URL. Images are compressed first.
+export async function uploadPhoto(file, folder = 'products') {
   const upload = await compressImage(file)
   const ext = upload.name.split('.').pop()
-  const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${ext}`
+  const fileName = `${folder}/${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${ext}`
+  const bucket = PHOTO_BUCKET
 
   const { error: uploadError } = await supabase.storage
     .from(bucket)

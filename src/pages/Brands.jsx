@@ -13,16 +13,30 @@ export default function Brands() {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState(null)
 
+  // Client parties in the accounts app (view ops.billing_parties, from the
+  // accounts link SQL). null = accounts app not linked yet → no link chips.
+  const [parties, setParties] = useState(null)
   const load = async () => {
-    const { data } = await supabase.from('brands').select('*').order('name')
+    const [{ data }, bp] = await Promise.all([
+      supabase.from('brands').select('*').order('name'),
+      supabase.from('billing_parties').select('*').order('name'),
+    ])
     setBrands(data || [])
+    setParties(bp.error ? null : (bp.data || []))
   }
+  const partyOf = id => parties?.find(p => p.brand_id === id)
+  const unlinkedCount = parties ? brands.filter(b => !partyOf(b.id)).length : 0
   useEffect(() => { load() }, [])
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold text-gray-100">Brands</h2>
+        <div>
+          <h2 className="text-xl font-bold text-gray-100">Brands</h2>
+          {canEdit && unlinkedCount > 0 && (
+            <p className="text-xs text-amber-300 mt-0.5">{unlinkedCount} not linked to a party in Accounts yet: link them in Accounts → Parties → Brand links</p>
+          )}
+        </div>
         {canEdit && (
           <button
             onClick={() => setShowForm(true)}
@@ -54,6 +68,9 @@ export default function Brands() {
               {b.contact_person && <p className="text-xs text-gray-400 truncate">{b.contact_person}</p>}
               <div className="flex flex-wrap gap-1 mt-1">
                 {b.portal_active && <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-950 border border-brand-800/60 text-brand-300">🔑 Portal on</span>}
+                {canEdit && parties && (partyOf(b.id)
+                  ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-900 text-emerald-300 truncate max-w-full" title="Invoices for this brand are made out to this party in the accounts app">🔗 {partyOf(b.id).name}</span>
+                  : <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-900 text-amber-300">not in Accounts</span>)}
                 {b.gstin ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 font-mono">{b.gstin}</span>
                   : <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-900 text-amber-300">no GSTIN</span>}
               </div>
@@ -64,17 +81,21 @@ export default function Brands() {
       </div>
 
       {canEdit && showForm && (
-        <BrandForm onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); load() }} />
+        <BrandForm parties={parties} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); load() }} />
       )}
       {canEdit && editing && (
-        <BrandForm brand={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
+        <BrandForm brand={editing} linkedParty={partyOf(editing.id)} parties={parties} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
       )}
     </div>
   )
 }
 
-function BrandForm({ brand, onClose, onSaved }) {
+function BrandForm({ brand, linkedParty, parties, onClose, onSaved }) {
   const isEdit = !!brand
+  // New brand: optionally start from a client you already bill in Accounts —
+  // fills the details in and links the two, instead of making a duplicate party.
+  const freeParties = (parties || []).filter(p => !p.brand_id)
+  const [fromParty, setFromParty] = useState('')
   const [name, setName] = useState(brand?.name || '')
   const [contact, setContact] = useState(brand?.contact_person || '')
   const [phone, setPhone] = useState(brand?.contact_phone || '')
@@ -109,6 +130,14 @@ function BrandForm({ brand, onClose, onSaved }) {
     }
   }
 
+  const pickParty = (id) => {
+    setFromParty(id)
+    const p = freeParties.find(x => x.id === id)
+    if (!p) return
+    setName(p.name || ''); setPhone(p.phone || ''); setEmail(p.email || ''); setAddress(p.address || '')
+    setGstin(p.gstin || ''); setState(p.state || (p.gstin ? stateFromGSTIN(p.gstin) : '')); setPan(p.pan || (p.gstin?.length === 15 ? p.gstin.slice(2, 12) : ''))
+  }
+
   const handleCopy = async () => {
     if (!portalPassword) return
     await navigator.clipboard.writeText(portalPassword)
@@ -131,29 +160,29 @@ function BrandForm({ brand, onClose, onSaved }) {
         portal_active: portalActive,
         logo_url,
       }
-      // Billing fields exist once the accounts link SQL has been run; only send
-      // them when filled in (or already present) so saving works either way.
-      const billing = {
+      Object.assign(payload, {
         gstin: gstin.trim() || null, state: state || null, pan: pan.trim() || null,
         email: email.trim() || null, billing_address: address.trim() || null,
         payment_terms_days: terms === '' ? null : Number(terms),
-      }
-      const hasBilling = Object.values(billing).some(v => v != null) || (brand && 'gstin' in brand)
-      if (hasBilling) Object.assign(payload, billing)
+      })
 
-      // supabase-js reports failures in { error } rather than throwing — they
-      // used to be ignored, so a failed save looked like it worked.
-      const { data: saved, error } = isEdit
-        ? await supabase.from('brands').update(payload).eq('id', brand.id).select().single()
+      let targetId = brand?.id
+      if (!isEdit && fromParty) {
+        // creates the brand already linked to that party (accounts link SQL)
+        const { data: newId, error: linkErr } = await supabase.schema('accounts_erp')
+          .rpc('create_brand_from_party', { p_party: fromParty, p_brand_name: name.trim() })
+        if (linkErr) throw new Error(linkErr.message)
+        targetId = newId
+      }
+      const { data: saved, error } = targetId
+        ? await supabase.from('brands').update(payload).eq('id', targetId).select().single()
         : await supabase.from('brands').insert(payload).select().single()
       if (!error && portalPassword.trim()) {
         const { error: pwErr } = await supabase.rpc('ops_set_portal_password', { p_brand_id: saved.id, p_password: portalPassword.trim() })
         if (pwErr) throw new Error('Brand saved, but the portal password was not: ' + pwErr.message)
         toast(`Portal password set for ${saved.name} — share it with them now; it can't be shown again.`, 'success', 7000)
       }
-      if (error) throw new Error(/column .* does not exist|schema cache/i.test(error.message)
-        ? `${error.message} — run the accounts link SQL (sql/integration/001_link_operations.sql) to enable billing fields.`
-        : error.message)
+      if (error) throw new Error(error.message)
       onSaved()
     } catch (err) {
       toast('Could not save: ' + err.message, 'error')
@@ -180,6 +209,24 @@ function BrandForm({ brand, onClose, onSaved }) {
     <Modal onClose={onClose}>
       <form onSubmit={save}>
         <h3 className="text-lg font-bold mb-4 text-gray-100">{isEdit ? 'Edit Brand' : 'Add Brand'}</h3>
+
+        {!isEdit && freeParties.length > 0 && (
+          <div className="mb-4 p-3 rounded-xl bg-gray-950 border border-gray-800">
+            <label className={labelClass}>Already a client in Accounts?</label>
+            <select value={fromParty} onChange={e => pickParty(e.target.value)} className={inputClass + ' !mb-1'}>
+              <option value="">No, new client</option>
+              {freeParties.map(p => <option key={p.id} value={p.id}>{p.name}{p.gstin ? ` · ${p.gstin}` : ''}</option>)}
+            </select>
+            <p className="text-[11px] text-gray-500">Picking one fills in their details and links the brand to that party, so invoices go to the right client.</p>
+          </div>
+        )}
+        {isEdit && parties && (
+          <p className={`text-xs mb-4 px-3 py-2 rounded-lg border ${linkedParty ? 'bg-emerald-950/40 border-emerald-900 text-emerald-300' : 'bg-amber-950/40 border-amber-900 text-amber-300'}`}>
+            {linkedParty
+              ? <>🔗 Billed as <b>{linkedParty.name}</b> in Accounts. GSTIN, address and contact details stay in sync both ways.</>
+              : <>Not linked to a client in Accounts yet. Link it in Accounts → Parties → Brand links.</>}
+          </p>
+        )}
         
         {brand?.logo_url && !file && (
           <img src={brand.logo_url} className="w-16 h-16 object-cover rounded-lg mb-2" />

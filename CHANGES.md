@@ -1,14 +1,25 @@
 # Operations ERP — what changed
 
-## Before you deploy (order matters)
+## Before you deploy
 
-1. In the SQL editor, run `migration_007_schema_catchup.sql` and then `migration_008_production_upgrades.sql`.
-2. Set the admin PIN: `select public.ops_bootstrap_admin('your-pin');`
-3. Deploy the new app. Then remove `VITE_ADMIN_PIN` and `VITE_TELEGRAM_*` from Netlify/Vercel.
-4. Telegram: set secrets, deploy the `notify` and `daily-digest` functions, and run `daily_digest_schedule.sql` (see README §3).
-5. Optional: run `migration_009_lockdown.sql` once the accounts app is moved into this project and signs in with email.
+Follow **MOVE_GUIDE.md**. In short:
+1. Run `ops_install.sql` in your invoice project and expose the `ops` schema.
+2. Copy your data with `move/move-data.mjs`, then run the install again.
+3. Run the accounts link SQL, point the app at the invoice project and deploy.
+4. Match brands to parties.
 
-Existing floor-manager and worker PINs and brand portal passwords keep working. 008 converts them to secure hashes.
+Existing staff PINs and brand portal passwords keep working: they're converted to secure hashes.
+
+## Moved into the shared project
+
+- **Own schema and storage.** Everything lives in the `ops` schema and the `ops-photos` bucket. Nothing in `public` or your other schemas is touched, so the app can share your invoice project.
+- **Function names can't clash.** The functions are now `ops-notify` and `ops-daily-digest`, and their secrets start with `NP_`.
+- **Brands ↔ accounts parties:**
+  - Each brand shows which client it's billed as.
+  - A new brand can start from an existing Accounts client: details filled in, already linked.
+  - Accounts has a Brand links screen with suggested matches.
+- **The lockdown lets in only your own email,** not any signed-in user. That matters because users from your other projects share the same sign-in system.
+- **Fixed:** the evening digest's work list failed because of an ambiguous team-member link.
 
 ## Faster record keeping (automation)
 
@@ -62,3 +73,4 @@ Existing floor-manager and worker PINs and brand portal passwords keep working. 
 
 - `src/pages/Products.jsx` and `src/components/Layout.jsx` are no longer used; they can be deleted.
 - The two Edge Functions compile but couldn't be run here (no Deno). Use **Settings → Send test message** after deploying.
+- Old `schema.sql` and `migration_00x` files are replaced by `ops_install.sql`; they're in the patch/original repo if ever needed.

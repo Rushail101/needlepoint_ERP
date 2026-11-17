@@ -7,7 +7,7 @@ import { supabase } from './supabaseClient.js'
 // deployed, so the app works without Telegram.
 export async function sendTelegramMessage(text, parseMode = 'HTML') {
   try {
-    const { error } = await supabase.functions.invoke('notify', { body: { text, parse_mode: parseMode } })
+    const { error } = await supabase.functions.invoke('ops-notify', { body: { text, parse_mode: parseMode } })
     if (error) console.warn('Telegram notify skipped:', error.message)
   } catch (err) {
     console.warn('Telegram notify skipped:', err?.message || err)

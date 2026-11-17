@@ -99,7 +99,7 @@ export default function Settings() {
 
       <div className={card}>
         <p className="text-xs uppercase font-bold text-gray-400 tracking-wider mb-2">Telegram</p>
-        <p className="text-[11px] text-gray-500 mb-3">Order, edit and dispatch alerts and the 8 pm daily digest go through the <code>notify</code> and <code>daily-digest</code> Supabase functions (see the README for setup).</p>
+        <p className="text-[11px] text-gray-500 mb-3">Order, edit and dispatch alerts and the 8 pm daily digest go through the <code>ops-notify</code> and <code>ops-daily-digest</code> Supabase functions (see the README for setup).</p>
         <button onClick={async () => { await sendTelegramMessage('✅ Test message from Needle Point ERP'); toast('Test sent — check the Telegram group (nothing arrives if the function or secrets are not set up yet).', 'info', 6000) }}
           className="bg-gray-800 border border-gray-700 text-gray-100 rounded-xl px-4 py-2 text-xs font-bold">Send test message</button>
       </div>
