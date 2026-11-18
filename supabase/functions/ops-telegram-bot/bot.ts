@@ -619,8 +619,11 @@ class Bot {
       return this.say('➕ <b>New order</b>\nWhich brand? <i>(or type the name)</i>', [...rows(shown.slice(0, 10).map((x: any, i: number) => b(x.name, `b:${i}`)), 2), [b('✖ Cancel', 'x')]]);
     }
     if (d.po === undefined) {
-      this.st.await = 'po'; await this.save();
-      return this.say(`<b>${esc(d.brandName)}</b>: PO number? Type it, or tap Skip.`, [[b('Skip (no PO)', 'po:skip')], [b('✖ Cancel', 'x')]]);
+      let next: string | null = null;
+      try { const { data } = await this.ctx.acc.rpc('next_proforma_number'); next = data || null; } catch (_) { next = null; }
+      this.st.nextPo = next; this.st.await = 'po'; await this.save();
+      return this.say(`<b>${esc(d.brandName)}</b>: PO number?${next ? ` Tap to use the next proforma number (the proforma will get the same number), or type the client's PO.` : ' Type it, or tap Skip.'}`,
+        [...(next ? [[b(`Use ${next}`, 'po:use')]] : []), [b('Skip (no PO)', 'po:skip')], [b('✖ Cancel', 'x')]]);
     }
     const cur = d.cur;
     if (!cur) {
@@ -682,7 +685,7 @@ class Bot {
   async orderButton(k: string, v: string) {
     const d = this.st.d;
     if (k === 'b') { const id = this.st.opts?.[Number(v)]; if (!id) return this.orderNext(); const { data: br } = await this.db.from('brands').select('id,name').eq('id', id).maybeSingle(); d.brand = br.id; d.brandName = br.name; return this.orderNext(); }
-    if (k === 'po') { d.po = null; return this.orderNext(); }
+    if (k === 'po') { d.po = v === 'use' ? this.st.nextPo || null : null; return this.orderNext(); }
     if (k === 'ga') {
       const id = this.st.cat?.[Number(v)];
       const { data: g } = await this.db.from('garments').select('*').eq('id', id).maybeSingle();

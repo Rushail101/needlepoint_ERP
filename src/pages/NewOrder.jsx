@@ -8,7 +8,7 @@ import { useAuth } from '../components/PinGate.jsx'
 import { sendTelegramMessage } from '../telegram.js'
 import { buildBatchSummaryText } from '../orderSummary.js'
 import { orderKeyOf } from '../billing.js'
-import { canMakeProforma, createOrderProforma, printOrderDocument, loadLinkedBrandIds } from '../proforma.js'
+import { canMakeProforma, createOrderProforma, printOrderDocument, loadLinkedBrandIds, nextProformaNumber } from '../proforma.js'
 
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL']
 // Defaults; the real values come from Settings (ops_settings) when available.
@@ -32,6 +32,13 @@ export default function NewOrder() {
   const [linkedBrands, setLinkedBrands] = useState(null)
   const [makeProforma, setMakeProforma] = useState(true)
   useEffect(() => { if (mayProforma) loadLinkedBrandIds().then(setLinkedBrands) }, [mayProforma])
+  // PO = the next proforma number (same series as Accounts), filled in until
+  // you type your own. The proforma made for this order then gets that number.
+  const [suggestedPo, setSuggestedPo] = useState('')
+  useEffect(() => {
+    if (!mayProforma) return
+    nextProformaNumber().then(n => { if (n) { setSuggestedPo(n); setPoNumber(cur => cur || n) } })
+  }, [mayProforma])
   const [dueDate, setDueDate] = useState('')
   const [, setSettingsLoaded] = useState(false)
   useEffect(() => {
@@ -347,6 +354,11 @@ export default function NewOrder() {
               placeholder="e.g. PO-2026-001"
               className={inputClass}
             />
+            {suggestedPo && (
+              poNumber.trim().toUpperCase() === suggestedPo
+                ? <p className="text-[11px] text-gray-500 -mt-2 mb-2">Next proforma number, filled in automatically: the proforma for this order gets the same number. Type over it if the client has their own PO.</p>
+                : <button type="button" onClick={() => setPoNumber(suggestedPo)} className="text-[11px] text-brand-400 hover:text-brand-300 -mt-2 mb-2 underline">Use next proforma number ({suggestedPo})</button>
+            )}
           </div>
 
           <div>

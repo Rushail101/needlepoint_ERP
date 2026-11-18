@@ -24,6 +24,13 @@ export async function createOrderProforma(orderKey) {
   return data
 }
 
+// Next PI number in the Accounts series (also skips PO numbers already used
+// on orders). null when the accounts link / proforma SQL isn't installed.
+export async function nextProformaNumber() {
+  const { data, error } = await accounts().rpc('next_proforma_number')
+  return error ? null : data
+}
+
 // Opens the same download / print dialog the accounts app shows.
 export async function printOrderDocument(invoiceId) {
   const { data, error } = await accounts().rpc('order_document_print', { p_invoice: invoiceId })
