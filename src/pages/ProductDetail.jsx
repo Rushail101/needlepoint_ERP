@@ -243,6 +243,66 @@ function ProgressTab({ product, sizes, logs, history, isClient }) {
   )
 }
 
+// An order added with "Sizes not decided yet" has one MIXED line. Once the
+// client confirms sizes, split it: the split quantities come off MIXED (it's
+// removed when nothing is left), so the order total stays the same.
+const SPLIT_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL']
+function SplitMixed({ productId, mixed, sizeList, onReload }) {
+  const [open, setOpen] = useState(false)
+  const [qty, setQty] = useState({})
+  const [saving, setSaving] = useState(false)
+  const pool = Number(mixed.quantity) || 0
+  const used = Object.values(qty).reduce((s, v) => s + (parseInt(v, 10) || 0), 0)
+  const left = pool - used
+  const save = async () => {
+    if (used <= 0) return
+    if (left < 0) { toast(`That's ${-left} more than the ${pool} mixed pieces. Raise the total on the size rows instead.`, 'error'); return }
+    setSaving(true)
+    try {
+      for (const [label, v] of Object.entries(qty)) {
+        const n = parseInt(v, 10) || 0
+        if (n <= 0) continue
+        const existing = sizeList.find(x => (x.size_label || '').toUpperCase() === label)
+        if (existing) must(await supabase.from('product_sizes').update({ quantity: (Number(existing.quantity) || 0) + n }).eq('id', existing.id), 'Updating size')
+        else must(await supabase.from('product_sizes').insert({ product_id: productId, size_label: label, quantity: n }), 'Adding size')
+      }
+      if (left > 0) must(await supabase.from('product_sizes').update({ quantity: left }).eq('id', mixed.id), 'Updating mixed')
+      else must(await supabase.from('product_sizes').delete().eq('id', mixed.id), 'Removing mixed')
+      toast(left > 0 ? `Split ${used} pieces into sizes, ${left} still mixed` : 'All pieces split into sizes', 'success')
+      setQty({}); setOpen(false); onReload()
+    } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
+  }
+  return (
+    <div className="bg-amber-950/30 border border-amber-900/60 rounded-xl p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-amber-200"><b>{pool} pieces</b> don't have sizes yet.</p>
+        {!open && <button onClick={() => setOpen(true)} className="bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-3 py-1.5 text-[11px] font-bold">Split into sizes</button>}
+      </div>
+      {open && (
+        <div className="mt-3">
+          <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
+            {SPLIT_SIZES.map(l => (
+              <div key={l} className="bg-gray-950 border border-gray-800 rounded-lg p-1.5 text-center">
+                <span className="block text-[11px] font-bold text-gray-300 mb-1">{l}</span>
+                <input type="number" min="0" inputMode="numeric" placeholder="0" value={qty[l] || ''}
+                  onChange={e => setQty(q => ({ ...q, [l]: e.target.value }))}
+                  className="w-full bg-gray-900 border border-gray-700 text-gray-100 text-center text-xs font-bold rounded py-1" />
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between mt-2 gap-2">
+            <p className={`text-[11px] ${left < 0 ? 'text-red-300' : 'text-gray-400'}`}>{used} split · {left} {left < 0 ? 'too many' : 'left mixed'}</p>
+            <div className="flex gap-2">
+              <button onClick={() => { setOpen(false); setQty({}) }} className="text-[11px] text-gray-400 hover:text-gray-200">Cancel</button>
+              <button onClick={save} disabled={saving || used <= 0 || left < 0} className="bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-3 py-1.5 text-[11px] font-bold disabled:opacity-40">{saving ? 'Saving…' : 'Save sizes'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SizesTab({ productId, sizes, canEdit, onReload }) {
   const [sizeList, setSizeList] = useState(sizes)
   const [newLabel, setNewLabel] = useState('')
@@ -269,8 +329,10 @@ function SizesTab({ productId, sizes, canEdit, onReload }) {
   }
 
   const total = sizeList.reduce((s, x) => s + (Number(x.quantity) || 0), 0)
+  const mixed = sizeList.find(x => (x.size_label || '').toUpperCase() === 'MIXED')
   return (
     <div className="space-y-3">
+      {mixed && canEdit && <SplitMixed productId={productId} mixed={mixed} sizeList={sizeList} onReload={onReload} />}
       <div className="space-y-2">
         {sizeList.map((s) => (
           <div key={s.id} className="flex items-center justify-between bg-gray-900 border border-gray-800 rounded-xl px-4 py-2.5">

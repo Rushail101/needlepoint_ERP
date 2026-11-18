@@ -11,6 +11,10 @@ import { orderKeyOf } from '../billing.js'
 import { canMakeProforma, createOrderProforma, printOrderDocument, loadLinkedBrandIds, nextProformaNumber } from '../proforma.js'
 
 const DEFAULT_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL']
+// Sizes to save for a garment. "Sizes not decided yet" saves one MIXED line.
+const sizesOf = (it) => it.noSizes
+  ? (parseInt(it.totalQty, 10) > 0 ? [{ size_label: 'MIXED', quantity: String(parseInt(it.totalQty, 10)) }] : [])
+  : it.sizes.filter((s) => parseInt(s.quantity, 10) > 0)
 // Defaults; the real values come from Settings (ops_settings) when available.
 let SAMPLE_FEE_BASE = 5000
 let SAMPLE_GST_RATE = 18
@@ -40,6 +44,8 @@ export default function NewOrder() {
     nextProformaNumber().then(n => { if (n) { setSuggestedPo(n); setPoNumber(cur => cur || n) } })
   }, [mayProforma])
   const [dueDate, setDueDate] = useState('')
+  // An order placed earlier and entered late: back-date it (affects ordering and stage timing).
+  const [orderDate, setOrderDate] = useState(todayISO())
   const [, setSettingsLoaded] = useState(false)
   useEffect(() => {
     getSettings().then(st => {
@@ -65,6 +71,8 @@ export default function NewOrder() {
       gstRate: 5,
       plannedWork: ['cutting', 'stitching', 'finishing'],
       sizes: DEFAULT_SIZES.map((sz) => ({ size_label: sz, quantity: '' })),
+      noSizes: false,
+      totalQty: '',
     },
   ])
 
@@ -147,6 +155,8 @@ export default function NewOrder() {
         gstRate: 5,
         plannedWork: ['cutting', 'stitching', 'finishing'],
         sizes: DEFAULT_SIZES.map((sz) => ({ size_label: sz, quantity: '' })),
+        noSizes: false,
+        totalQty: '',
       },
     ])
   }
@@ -168,6 +178,10 @@ export default function NewOrder() {
     for (const it of items) {
       if (!it.name.trim()) {
         toast('Please provide a name for all garments in this order.', 'error')
+        return
+      }
+      if (it.noSizes && !(parseInt(it.totalQty, 10) > 0) && status !== 'sampling') {
+        toast(`Enter the total quantity for ${it.name.trim()}.`, 'error')
         return
       }
     }
@@ -208,7 +222,7 @@ export default function NewOrder() {
           garmentId = newG.id
         }
 
-        const validSizes = it.sizes.filter((s) => parseInt(s.quantity, 10) > 0)
+        const validSizes = sizesOf(it)
         const totalUnits = validSizes.reduce((sum, s) => sum + parseInt(s.quantity, 10), 0)
         const isSample = status === 'sampling'
         const rate = isSample ? SAMPLE_FEE_BASE : (it.pricePerPiece ? Number(it.pricePerPiece) : null)
@@ -224,6 +238,7 @@ export default function NewOrder() {
           brand_id: finalBrandId,
           po_number: cleanPo,
           due_date: dueDate || null,
+          ...(orderDate && orderDate !== todayISO() ? { created_at: `${orderDate}T12:00:00+05:30` } : {}),
           status: isClient ? 'in_production' : status,
           stage: 'cutting',
           planned_work: it.plannedWork || ['cutting', 'stitching', 'finishing'],
@@ -259,7 +274,7 @@ export default function NewOrder() {
       const batchData = {
         po_number: cleanPo || 'N/A',
         items: items.map((it) => {
-          const validSizes = it.sizes.filter((s) => parseInt(s.quantity, 10) > 0)
+          const validSizes = sizesOf(it)
           const totalUnits = validSizes.reduce((sum, s) => sum + parseInt(s.quantity, 10), 0)
           const isSample = status === 'sampling'
           const rate = isSample ? SAMPLE_FEE_BASE : (it.pricePerPiece ? Number(it.pricePerPiece) : null)
@@ -361,9 +376,17 @@ export default function NewOrder() {
             )}
           </div>
 
+          {!isClient && (
+            <div>
+              <label className={labelClass}>Order date</label>
+              <input type="date" value={orderDate} max={todayISO()} onChange={(e) => setOrderDate(e.target.value || todayISO())} className={inputClass} />
+              {orderDate !== todayISO() && <p className="text-[11px] text-gray-500 -mt-2 mb-2">Entering an older order. It's dated {new Date(orderDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}; a proforma made now is still dated today.</p>}
+            </div>
+          )}
+
           <div>
             <label className={labelClass}>{isClient ? 'Needed by' : 'Delivery date'}</label>
-            <input type="date" value={dueDate} min={todayISO()} onChange={(e) => setDueDate(e.target.value)} className={inputClass} />
+            <input type="date" value={dueDate} min={isClient ? todayISO() : undefined} onChange={(e) => setDueDate(e.target.value)} className={inputClass} />
           </div>
 
           {!isClient && (
@@ -598,7 +621,23 @@ export default function NewOrder() {
               </div>
 
               <div>
-                <label className={labelClass}>Sizes & Quantities</label>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <label className={labelClass + ' !mb-0'}>{it.noSizes ? 'Total quantity' : 'Sizes & Quantities'}</label>
+                  <label className="flex items-center gap-1.5 text-[11px] text-gray-400 cursor-pointer">
+                    <input type="checkbox" checked={!!it.noSizes}
+                      onChange={(e) => { const c = e.target.checked; setItems(prev => prev.map((x, i) => i === idx ? { ...x, noSizes: c } : x)) }}
+                      className="rounded border-gray-700 bg-gray-950 text-brand-600 focus:ring-brand-500" />
+                    Sizes not decided yet
+                  </label>
+                </div>
+                {it.noSizes ? (
+                  <div>
+                    <input type="number" min="1" placeholder="Total pieces, e.g. 120" value={it.totalQty}
+                      onChange={(e) => { const v = e.target.value; setItems(prev => prev.map((x, i) => i === idx ? { ...x, totalQty: v } : x)) }}
+                      className={inputClass + ' !mb-1'} />
+                    <p className="text-[11px] text-gray-500">Saved as one "Mixed" line. Split it into sizes later on the garment page (Sizes tab → Split into sizes).</p>
+                  </div>
+                ) : (
                 <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                   {it.sizes.map((s, sIdx) => (
                     <div key={sIdx} className="bg-gray-950 border border-gray-800 rounded-xl p-2 text-center">
@@ -624,6 +663,7 @@ export default function NewOrder() {
                     </div>
                   ))}
                 </div>
+                )}
               </div>
 
               {!it.pickedGarmentId && (

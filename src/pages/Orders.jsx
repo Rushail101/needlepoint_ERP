@@ -9,6 +9,8 @@ import { can } from '../permissions.js'
 import { exportBatchOrderPDF } from '../pdfExport.js'
 import { orderKeyOf, loadOrderBilling, loadOrderDocuments, billingBadge } from '../billing.js'
 import OrderDocs from '../components/OrderDocs.jsx'
+import { deleteOrder, canDeleteOrders } from '../orderDelete.js'
+import { toast } from '../components/Toast.jsx'
 import { canMakeProforma } from '../proforma.js'
 import { deliveryStatus, isDone, todayISO, addDays } from '../production.js'
 
@@ -553,6 +555,20 @@ export default function Orders() {
               </div>
             )
           })()}
+          {canDeleteOrders(user) && (
+            <div className="mt-5 pt-3 border-t border-gray-800 flex justify-end">
+              <button onClick={async () => {
+                try {
+                  const res = await deleteOrder(selectedBatch.items, { brandName: selectedBatch.brands?.name || '' })
+                  if (!res) return
+                  toast(res.cancelled?.length ? `Order deleted. Proforma ${res.cancelled.join(', ')} marked cancelled in Accounts` : 'Order deleted', 'success', 6000)
+                  setSelectedBatch(null); load()
+                } catch (e) { toast(e.message, 'error', 9000) }
+              }} className="text-xs font-semibold text-red-400 hover:text-red-300 py-2 px-3 rounded-lg hover:bg-red-950/40 transition">
+                🗑 Delete this order
+              </button>
+            </div>
+          )}
         </Modal>
       )}
 

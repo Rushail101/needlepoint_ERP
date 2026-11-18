@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { deleteOrder, canDeleteOrders } from '../orderDelete.js'
+import { useAuth } from './PinGate.jsx'
 import { supabase, uploadPhoto, getSettings, must } from '../supabaseClient.js'
 import { toast } from './Toast.jsx'
 import Modal, { FormActions, inputClass, labelClass } from './Modal.jsx'
@@ -8,6 +10,7 @@ import { sendTelegramMessage } from '../telegram.js'
 // (defaults ₹5,000 + 18%). Production orders keep price-per-piece × GST slab.
 
 export default function OrderEditModal({ product, brands, onClose, onSaved, onDeleted }) {
+  const { user } = useAuth()
   const [name, setName] = useState(product.name || '')
   const [styleCode, setStyleCode] = useState(product.style_code || '')
   const [brandId, setBrandId] = useState(product.brand_id || '')
@@ -130,26 +133,15 @@ export default function OrderEditModal({ product, brands, onClose, onSaved, onDe
   }
 
   const remove = async () => {
-    if (!confirm(`Delete "${product.name}"? This removes all its photos, sizes, and work history too.`)) return
     setSaving(true)
     try {
-      must(await supabase.from('products').delete().eq('id', product.id), 'Delete')
-      
-      const brandName = brands.find((b) => b.id === product.brand_id)?.name || 'No Brand'
-      const deleteMessage = [
-        `🗑️ <b>GARMENT / ORDER DELETED</b>`,
-        `━━━━━━━━━━━━━━━━━━━━`,
-        `<b>Garment:</b> ${product.name}`,
-        `<b>Brand:</b> ${brandName}`,
-        `<b>Style Code:</b> ${product.style_code || 'N/A'}`,
-        `<b>PO Number:</b> ${product.po_number || 'N/A'}`,
-      ].join('\n')
-      
-      sendTelegramMessage(deleteMessage)
-
+      const brandName = brands.find((b) => b.id === product.brand_id)?.name || ''
+      const res = await deleteOrder([product], { brandName, whole: false })
+      if (!res) return
+      toast(res.cancelled?.length ? `Deleted. Proforma ${res.cancelled.join(', ')} marked cancelled in Accounts` : 'Deleted', 'success')
       onDeleted()
     } catch (err) {
-      toast('Could not delete: ' + err.message, 'error')
+      toast('Could not delete: ' + err.message, 'error', 9000)
     } finally {
       setSaving(false)
     }
@@ -246,7 +238,7 @@ export default function OrderEditModal({ product, brands, onClose, onSaved, onDe
         </div>
 
         {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
-        <FormActions onCancel={onClose} saving={saving} onDelete={remove} />
+        <FormActions onCancel={onClose} saving={saving} onDelete={canDeleteOrders(user) ? remove : undefined} />
       </form>
     </Modal>
   )
